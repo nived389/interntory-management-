@@ -1,0 +1,10 @@
+data
+.env
+.env.*
+google-auth.local.json
+.venv*
+.git
+__pycache__
+.pytest_cache
+tmp
+*.pyc

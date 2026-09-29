@@ -1,0 +1,926 @@
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+INVENTORY MANAGEMENT 
+SYSTEM
+Full Website Development Plan
+for Travellers Cavern & Travelicious
+Purpose of this document
+A complete implementation specification that can be given to an AI coding agent or software developer to build a production-
+ready, responsive inventory website. It covers interface design, permissions, workflows, database design, formulas, reports, 
+camera/photo handling, Excel migration, security, retention, testing and deployment.
+Business Initial structure Primary usage
+Travelicious Store, Service, Cafe, Games, Admin Staff on mobile; Master on laptop
+Travellers Cavern General section initially; additional sections can be added Staff on mobile; Master on laptop
+Prepared from the requirements provided and the uploaded workbook "monthly inventory july copy.xlsx".
+Document date: 28 September 2026
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Document Roadmap
+Section What it contains
+1 Goals and final scope
+2 Business structure and terminology
+3 Roles and permissions
+4 Inventory logic and formulas
+5 Full page-by-page interface design
+6 Detailed operating workflows
+7 Reports and export formats
+8 Rates, valuation and financial totals
+9 Data model / database schema
+10 API and backend execution rules
+11 Camera, photo compression and storage
+12 Security, audit, retention and backup
+13 Excel migration and initial item lists
+14 Technical architecture and deployment
+15 Development phases and testing
+16 AI-builder implementation brief and acceptance criteria
+Appendices Cafe and Service item lists from the uploaded workbook
+Key implementation principle
+Use a transaction-ledger model plus immutable month-end snapshots. Do not directly overwrite a single stock number 
+without a transaction record. This is what makes six-year reporting, audits, breakage valuation and month-to-month 
+reconciliation reliable.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+1. Goals and Final Scope
+The system should replace the current spreadsheet-based monthly inventory process while keeping the familiar report 
+layout. It must be simple enough for staff to use on mobile phones, but detailed enough for the Master user to manage 
+stock, rates, reports and historical records from a laptop.
+1.1 Required outcomes
+ Two properties in one system: Travelicious and Travellers Cavern, selectable by all staff.
+ Monthly physical inventory: each item is counted every month, with the final actual quantity becoming the next 
+month's previous stock.
+ Blind staff counting: staff do not see calculated stock differences while counting; the Master sees variance after 
+submission.
+ Automatic breakage deduction: a submitted breakage record immediately creates a stock deduction and is 
+included in monthly breakage reports.
+ Photo-first item records: new items include a photo; breakage records require a camera/upload photo.
+ Compressed images: images are resized and compressed before upload to reduce six-year storage usage.
+ Rate/value tracking: unit rates can be recorded and monthly/yearly purchase and breakage values calculated.
+ Reports and exports: section-wise, property-wise and combined reports; Excel-compatible inventory export plus 
+PDF reports.
+ Six-year history: inventory snapshots, transactions, breakage photos and audit records retained for at least 72 
+months.
+ Easy expansion: sections can be added later without changing the database or redesigning the website.
+1.2 Recommended improvement without changing the requested context
+Separate the operational ledger from the monthly report
+Staff actions (purchase/addition, damage, breakage and count) should create immutable transactions. Monthly reports are 
+generated from those transactions. This avoids manual arithmetic errors and preserves the exact history even when an item 
+rate, name or section changes later.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+2. Business Structure and Terminology
+Level Travelicious Travellers Cavern Rule
+Property Travelicious Travellers Cavern Top-level business selector
+Section Store, Service, Cafe, Games, 
+Admin General (initial) Master can add, rename, archive and 
+reorder sections
+Item Individual inventory object Individual inventory object An item belongs to one property + one 
+section
+Transaction Addition, Damage, Breakage, 
+Adjustment, Transfer Same Every stock movement is logged
+Monthly Count Physical count by section/month Physical count by section/month Closing actual becomes next month 
+opening
+2.1 Item master data
+Field Required? Purpose / example
+Item code / ID System generated Stable internal reference, e.g. TVL-CAF-0001
+Item name Yes COFFEE MUG
+Property Yes Travelicious / Travellers Cavern
+Section Yes Cafe / Service / etc.
+Category Optional Glassware, Furniture, Equipment, Games
+Specification Yes Brand, model, size, colour, material, capacity or free-text specification
+Unit Yes Nos / Set / Pair / Piece
+Primary photo Yes for new items Compressed item reference photo
+Default unit rate Recommended Latest known replacement/purchase rate in INR
+Opening / added quantity When creating Creates a stock-addition/opening transaction
+Active status System Archived items remain in history but stop appearing in active counts
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+3. Login, Roles and Permissions
+3.1 Roles
+Capability MASTER login STAFF login
+Access Travelicious + Travellers Cavern Yes Yes
+View current calculated stock Yes No by default
+View monthly stock difference / variance Yes No
+View rates and financial totals Yes No by default (configurable)
+Perform monthly physical count Yes Yes - blind count
+Add stock / purchase quantity Yes Yes
+Create new item Yes Yes, simplified form; Master can edit 
+later
+Report breakage / damage with photo Yes Yes
+Edit item, section, historical record Yes No
+Close / reopen a month Yes No
+Manage users Yes No
+Export reports Yes No unless enabled later
+View audit log Yes No
+Stock privacy rule for staff
+During counts and daily actions, staff see item names, photos and specifications, but not previous stock, expected stock or 
+calculated difference. This creates a true blind count and prevents the system number from influencing the physical count.
+3.2 Login behavior
+ Single login page for both roles.
+ Username/email + password; show/hide password button.
+ After authentication, route automatically by role: MASTER -> Master Dashboard; STAFF -> Staff Home.
+ Master account should support two-factor authentication as an optional security setting.
+ Five failed attempts should trigger a short lockout/rate limit; no password should be stored in plain text.
+ Session timeout can be longer on trusted staff mobiles but must require re-login for sensitive Master settings.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+4. Inventory Logic, Monthly Formula and Statuses
+4.1 Core monthly formula
+Excel-compatible summary formula
+Previous Month Stock + New Stock - Damage/Breakage = Expected Stock. Staff enters Actual physical quantity. Master 
+sees Difference = Actual - Expected. When the month is closed, Actual becomes the next month's Previous Month Stock.
+Measure How it is calculated Who sees it
+Previous Month Stock Previous closed month Actual Master; hidden from 
+staff count screen
+New Stock Sum of approved/open stock-addition transactions during the month Master
+Damage Sum of unusable quantity. For the Excel-compatible export this includes breakage 
+deductions. Master
+Breakage Qty Sum of Breakage transactions only Master; separate 
+breakage report
+Expected Stock Previous + New - Damage/Breakage (+/- approved adjustments/transfers) Master
+Actual Physical quantity counted at month end Staff enters; Master 
+sees
+Difference Actual - Expected Master only
+Purchase Value Sum of addition quantity x transaction unit rate Master
+Breakage Value Sum of breakage quantity x unit rate captured at event Master
+4.2 Month lifecycle
+Status Meaning Allowed actions
+OPEN Month/section available for counting Staff can count; transactions allowed
+IN PROGRESS At least one count line saved Autosave and continue
+SUBMITTED Staff count submitted Staff read-only; Master reviews variance
+CLOSED Master finalized month Snapshot immutable; reports archived
+REOPENED Master reopened with mandatory reason Changes allowed and fully audited
+4.3 Important business rules
+ Only one monthly count record exists for each property + section + calendar month.
+ Every active item in a section must be counted, or explicitly marked Not Found / Not Applicable with a note.
+ A quantity may be zero; blank is not equal to zero.
+ New items added mid-month start with previous stock = 0 and their opening/new quantity appears under New Stock.
+ Closed-month data cannot be silently edited. Reopening requires Master permission and a reason, and all changes 
+are logged.
+ If a breakage quantity is greater than available calculated stock, reject it with a generic staff-facing validation 
+message that does not reveal the exact stock balance.
+ Deleting an item means archive, not hard delete, so six-year history remains complete.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+5. Full Page-by-Page Interface Design
+Responsive design rule
+STAFF screens are mobile-first with large touch targets, camera buttons, bottom navigation and minimal numbers. MASTER 
+screens are desktop/laptop-first with side navigation, tables, filters and summary cards. The same web app remains 
+responsive on both.
+Page 01 - Login
+Audience Primary device Purpose
+All users Mobile + Desktop Secure entry point
+Layout: Centered card; logo/title at top; one-column form.
+Fields / content: Username/email, password, show/hide password, remember device (optional).
+Primary actions: Sign In; Forgot Password.
+Rules / behavior: Detect role after successful login and route automatically. Never show role options that could be used 
+to bypass authorization.
+┌──────────────────────────────┐
+│  TRAVELLERS / TRAVELICIOUS   │
+│      Inventory System        │
+│                              │
+│  Username / Email            │
+│  [______________________]    │
+│  Password              (eye) │
+│  [______________________]    │
+│  [      SIGN IN        ]     │
+│  Forgot password             │
+└──────────────────────────────┘
+Page 02 - Password Reset
+Audience Primary device Purpose
+All users Mobile + Desktop Recover access
+Layout: Simple form with status feedback.
+Fields / content: Email/username; reset code/new password if enabled.
+Primary actions: Send reset link/code; Set new password.
+Rules / behavior: Master can also reset a staff password from User Management. Do not expose whether an unknown 
+username exists.
+Page 03 - Master Dashboard
+Audience Primary device Purpose
+Master Laptop primary Immediate operational overview
+Layout: Left sidebar + top property/month filters + KPI cards + exception panels.
+Fields / content: Property, month, total active items, monthly counts pending, breakage qty/value, purchase value, 
+unresolved variance.
+Primary actions: Open Inventory; Review Counts; Breakage Report; Reports; Add Item.
+Rules / behavior: KPI cards may show values and differences because Master has full access.
+┌ Sidebar ──────┬───────────────────────────────────────┐
+│ Dashboard     │ Travelicious | Sep 2026        Master │
+│ Inventory     ├───────────────────────────────────────┤
+│ Monthly Count │ [Active Items] [Breakage] [Purchases]│
+│ Breakage      │ [Counts Pending] [Variance Alerts]   │
+│ Reports       ├───────────────────────────────────────┤
+│ Users         │ Sections status / recent activity    │
+│ Settings      │                                      │
+└───────────────┴───────────────────────────────────────┘
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 04 - Staff Home
+Audience Primary device Purpose
+Staff Mobile Fast access to daily actions
+Layout: Top property selector, large action cards, bottom nav.
+Fields / content: Current property; optionally current section; recent own submissions.
+Primary actions: Monthly Count; Add Stock; Breakage; Add New Item.
+Rules / behavior: Do not display stock balances, variance, previous stock, or financial dashboards.
+┌────────────────────────────┐
+│ Travelicious ▼       Staff │
+│ What do you want to do?    │
+│ [ Monthly Inventory ]      │
+│ [ Add Stock / Purchase ]   │
+│ [ Report Breakage ]        │
+│ [ Add New Item ]           │
+│                            │
+│ Home  Count  +  Breakage   │
+└────────────────────────────┘
+Page 05 - Property & Section Picker
+Audience Primary device Purpose
+All users Mobile + Desktop Choose operational context
+Layout: Property cards then section chips/cards.
+Fields / content: Travelicious / Travellers Cavern; active sections only.
+Primary actions: Select property; Select section; Continue.
+Rules / behavior: Travelicious defaults: Store, Service, Cafe, Games, Admin. Travellers Cavern defaults to General and 
+can be expanded by Master.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 06 - Master Inventory List
+Audience Primary device Purpose
+Master Laptop Search and manage inventory
+Layout: Table/grid with filters and thumbnail column.
+Fields / content: Photo, item, code, property, section, specification, current calculated stock, unit rate, status.
+Primary actions: Search; Filter; Add Item; Open Detail; Export; Bulk Move Section; Archive.
+Rules / behavior: Fast server-side search. Current stock derives from ledger; do not store a second editable balance.
+Page 07 - Item Detail / Ledger
+Audience Primary device Purpose
+Master Laptop Complete history of one item
+Layout: Header with photo/item identity; cards for current stock/rate; tabs for transactions, counts, breakage photos.
+Fields / content: Item details, specs, rate, stock, transaction history, monthly history.
+Primary actions: Edit; Add Stock; Record Adjustment; Archive; Export Item History.
+Rules / behavior: Historical transaction snapshots stay unchanged if item name or rate later changes.
+Page 08 - Add / Edit Item (Master)
+Audience Primary device Purpose
+Master Laptop + Mobile Create a complete item master
+Layout: Step form or single scroll card with photo first.
+Fields / content: Property, section, name, category, specification, unit, rate, opening/add quantity, camera/upload 
+image.
+Primary actions: Take Photo; Upload; Save Item; Save & Add Another.
+Rules / behavior: On save, create item then create opening/addition transaction for entered quantity. Warn for similar 
+existing names to reduce duplicates.
+Page 09 - Add New Item (Staff)
+Audience Primary device Purpose
+Staff Mobile Allow staff to register newly bought/newly introduced item
+Layout: Minimal mobile form; no stock totals shown.
+Fields / content: Property, section, item name, specification, unit, quantity bought/added, unit rate (if known), camera 
+photo, note.
+Primary actions: Take Photo; Submit.
+Rules / behavior: Creates the item plus an addition transaction. Master can correct name/category/rate later. Do not 
+show the resulting total stock.
+Page 10 - Add Stock / Purchase
+Audience Primary device Purpose
+Master + Staff Mobile first Record newly purchased/added quantity
+Layout: Property -> section -> item search/card -> quantity/rate form.
+Fields / content: Item, added quantity, unit purchase rate, purchase date, invoice/reference optional, note.
+Primary actions: Submit Addition.
+Rules / behavior: Each submission is a transaction. Purchase amount = quantity x unit rate. Update item default/latest 
+unit rate only according to configured rule.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 11 - Monthly Count List
+Audience Primary device Purpose
+Master + Staff Mobile for staff; laptop 
+for Master Show monthly count status by section
+Layout: Month selector and section cards with status/progress.
+Fields / content: Month, property, section, progress, status.
+Primary actions: Start/Continue Count; Master Review if submitted.
+Rules / behavior: Staff sees progress only, not expected quantity or variance.
+Page 12 - Monthly Blind Count
+Audience Primary device Purpose
+Staff Mobile Enter physical actual quantity for every item
+Layout: One item card at a time or compact list; photo + name + spec + large numeric input.
+Fields / content: Item photo, name, specification, Actual quantity, optional note.
+Primary actions: Previous; Save & Next; Search; Mark 0; Mark Not Found.
+Rules / behavior: Autosave each line. Hide Previous, New, Damage, Expected and Difference. Allow resuming after 
+network loss.
+┌────────────────────────────┐
+│ Cafe - Sep 2026      12/61 │
+│ [ item photo ]             │
+│ COFFEE MUG                 │
+│ Spec: Ceramic, ...         │
+│ Physical quantity          │
+│ [          24          ]   │
+│ Note (optional)            │
+│ [ Save & Next ]            │
+└────────────────────────────┘
+Page 13 - Staff Count Review & Submit
+Audience Primary device Purpose
+Staff Mobile Confirm all physical counts before submission
+Layout: Checklist of items and entered actual values only.
+Fields / content: Item name, entered actual, missing note indicator.
+Primary actions: Edit Count; Submit Monthly Count.
+Rules / behavior: Do not reveal system expectation or difference. After submit, make staff view read-only.
+Page 14 - Master Monthly Review & Close
+Audience Primary device Purpose
+Master Laptop Reconcile expected vs physical stock and finalize month
+Layout: Wide table with sticky headers, filters for differences.
+Fields / content: Prev, New, Damage/Breakage, Expected, Actual, Difference, rate/value where relevant.
+Primary actions: Approve/Close Month; Export; Reopen previous month (with reason).
+Rules / behavior: Closing creates an immutable month snapshot and archives report files. Difference highlighted but 
+not auto-adjusted without explicit Master action.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 15 - Breakage Start
+Audience Primary device Purpose
+Master + Staff Mobile Start a breakage report quickly
+Layout: Wizard step 1 with property and section.
+Fields / content: Property, section.
+Primary actions: Continue.
+Rules / behavior: All staff can access both properties. Default to last-used property/section but always show selection 
+clearly.
+Page 16 - Breakage Item Selection
+Audience Primary device Purpose
+Master + Staff Mobile Find broken object
+Layout: Search box + photo cards; recently used items first.
+Fields / content: Item photo, name, specification.
+Primary actions: Select item.
+Rules / behavior: No current stock quantity shown to staff.
+Page 17 - Breakage Camera
+Audience Primary device Purpose
+Master + Staff Mobile camera Capture proof photo
+Layout: Full-width Take Photo button, preview, retake.
+Fields / content: Camera image or gallery upload.
+Primary actions: Take Photo; Retake; Use Photo.
+Rules / behavior: Breakage cannot be submitted without at least one valid photo. Request rear camera with 
+capture="environment" when supported.
+┌────────────────────────────┐
+│ Report Breakage - Photo    │
+│                            │
+│     [ CAMERA PREVIEW ]     │
+│                            │
+│ [ Take / Retake Photo ]    │
+│ [ Use this Photo ]         │
+└────────────────────────────┘
+Page 18 - Breakage Details & Submit
+Audience Primary device Purpose
+Master + Staff Mobile Complete breakage event
+Layout: Selected item summary + form + photo thumbnail.
+Fields / content: Broken quantity, reason dropdown, reason note, event date/time (default now), photo.
+Primary actions: Submit Breakage.
+Rules / behavior: On submit, save breakage event and negative inventory transaction atomically. Staff sees reference 
+number only, not remaining stock.
+Page 19 - Breakage Confirmation
+Audience Primary device Purpose
+Master + Staff Mobile Clear success state
+Layout: Success card with event reference and item.
+Fields / content: Reference ID, item, qty, section, timestamp.
+Primary actions: Report Another; Home.
+Rules / behavior: Prevent double submission using idempotency key / disabled submit button.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 20 - Breakage History
+Audience Primary device Purpose
+Master Laptop Review all breakage events
+Layout: Filterable table + photo lightbox.
+Fields / content: Date, property, section, item, qty, reason, staff, rate, loss value, photo.
+Primary actions: Open Detail; Export; Filter month/year; Correct via adjustment workflow.
+Rules / behavior: Never delete evidence silently; corrections create an audit event.
+Page 21 - Reports Hub
+Audience Primary device Purpose
+Master Laptop Single entry point for reporting
+Layout: Report cards and filters.
+Fields / content: Month/year/property/section; report type.
+Primary actions: Open report; Export Excel; Export PDF.
+Rules / behavior: Remember last filters. Reports derive from closed snapshots by default, with optional current/open-
+month preview.
+Page 22 - Monthly Inventory Report
+Audience Primary device Purpose
+Master Laptop Excel-like inventory statement
+Layout: Table matching source workbook structure, with image thumbnails.
+Fields / content: S.No, Item, Picture, Prev Month Stock, New Stock, Damage, Actual; extended values optional.
+Primary actions: Export Excel/PDF; Select section/property.
+Rules / behavior: Default Excel export preserves the familiar layout; extended export appends specs/rates/values 
+without changing the core columns.
+Page 23 - Monthly Breakage Report
+Audience Primary device Purpose
+Master Laptop Monthly evidence and loss report
+Layout: Summary cards + detailed rows with thumbnails.
+Fields / content: Item, broken qty, section/location, reason, photo, staff, unit rate, breakage value, date.
+Primary actions: Export Excel/PDF; Print; Filter.
+Rules / behavior: Monthly totals by section and property. Include signature area in PDF/print format if desired.
+Page 24 - Yearly Report
+Audience Primary device Purpose
+Master Laptop View twelve-month trends and totals
+Layout: Year selector; summary cards; month table; top breakage items.
+Fields / content: Opening/closing summary, yearly additions, purchase value, breakage qty/value, damage, variance.
+Primary actions: Export Annual PDF/Excel.
+Rules / behavior: Pull from 12 closed month snapshots; do not recompute old months from changed current item 
+settings.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 25 - Export Dialog
+Audience Primary device Purpose
+Master Laptop Control report file output
+Layout: Modal/drawer with format and scope choices.
+Fields / content: Excel/PDF/CSV optional, property, section, month/year, include photos, detailed/summary.
+Primary actions: Generate & Download.
+Rules / behavior: Use server-side export for large photo reports. Generated month-close files are archived for 6 years.
+Page 26 - Manage Sections
+Audience Primary device Purpose
+Master Laptop Maintain business structure
+Layout: Two property panels with sortable sections.
+Fields / content: Section name, code, active status, display order.
+Primary actions: Add; Rename; Archive; Reorder.
+Rules / behavior: Do not hard-delete a section with history. Travellers Cavern starts with General but supports 
+unlimited later sections.
+Page 27 - Manage Staff
+Audience Primary device Purpose
+Master Laptop Create and maintain logins
+Layout: User table + create/edit drawer.
+Fields / content: Name, username/email, role=Staff, active status, temporary password.
+Primary actions: Create; Disable; Reset Password; View Activity.
+Rules / behavior: All staff are allowed both properties unless future permissions are added. Disabled users keep 
+historical authorship.
+Page 28 - Excel Import
+Audience Primary device Purpose
+Master Laptop Import the initial workbook and future bulk lists
+Layout: Upload zone + mapping preview + conflict list.
+Fields / content: Source sheet, target property/section, item name, photo, quantity/rate if present.
+Primary actions: Preview; Resolve Duplicate; Import.
+Rules / behavior: Initial migration maps Cafe report -> Travelicious/Cafe and SERVICE PRINT -> Travelicious/Service. 
+Never auto-rename source item labels during import.
+Page 29 - Settings
+Audience Primary device Purpose
+Master Laptop System-level configuration
+Layout: Tabbed settings.
+Fields / content: Currency INR, image compression target, breakage reason list, unit list, rate visibility, close-month 
+rules.
+Primary actions: Save Settings.
+Rules / behavior: Critical changes logged. Default image settings should be safe for mobile and six-year retention.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Page 30 - Audit Log
+Audience Primary device Purpose
+Master Laptop Trace who changed what and when
+Layout: Filterable immutable log.
+Fields / content: User, action, entity, before/after summary, timestamp, device/IP metadata if available.
+Primary actions: Filter; Export.
+Rules / behavior: No staff edit/delete. Record month reopen, corrections, item edits, user changes and export 
+generation.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+6. Detailed Operating Workflows
+6.1 Staff breakage workflow - exact execution
+1. Staff signs in and taps Report Breakage.
+2. Select Travelicious or Travellers Cavern, then select the section.
+3. Search/select the object by name or photo.
+4. Tap camera, capture a clear photo and confirm the preview.
+5. Enter broken quantity and choose a required reason. Add note when necessary.
+6. Client compresses the image before upload. Server validates the upload and returns a storage key.
+7. On Submit, backend starts one database transaction: create breakage_event, snapshot unit rate, create negative 
+inventory_transaction, write audit log, commit.
+8. If any database step fails, rollback so stock cannot be deducted without a breakage record.
+9. Return success reference. Staff must not see the updated balance or variance.
+10. The event automatically appears in the current month breakage report and inventory movement totals.
+6.2 Monthly count workflow
+11. Master/system opens the current month count for each active section.
+12. Staff selects property + section and counts actual physical stock without seeing system expectations.
+13. Each line autosaves. Offline/local draft support stores unsent values until connection returns.
+14. Staff reviews entered actual quantities and submits the section count.
+15. Master review page calculates Previous, New Stock, Damage/Breakage, Expected, Actual and Difference.
+16. Master investigates differences. If correction is required, enter a reasoned adjustment transaction rather than editing 
+history invisibly.
+17. Master closes the month. The Actual quantity for every line becomes the immutable closing snapshot.
+18. The closed Actual becomes next month's Previous Month Stock.
+19. Generate and archive the section report, property report and breakage report files.
+6.3 New purchase / stock addition workflow
+20. Select property, section and existing item; or create a new item first.
+21. Enter quantity received and unit purchase rate. Date defaults to today but can be changed by Master.
+22. Optional invoice/reference note can be stored.
+23. Create positive inventory transaction and purchase value = quantity x transaction rate.
+24. Optionally update the item default/latest rate to this purchase rate. Store the transaction rate permanently even if the 
+default rate later changes.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+7. Reports and Export Formats
+7.1 Required report set
+Report Scopes Frequency / use
+Monthly Inventory Section, Travelicious, Travellers Cavern, 
+Combined Every month; core stock report
+Monthly Breakage Section, property, combined Every month; includes reasons/photos/value
+Monthly Purchase / Addition Section, property, combined Purchase quantity and value
+Yearly Inventory Summary Property/combined 12-month stock movement and closing
+Yearly Breakage Summary Section/property/combined Qty and loss value by month/item/reason
+Item History Single item Full six-year transaction + count trail
+Audit Report User/action/date range Administrative traceability
+7.2 Excel-compatible inventory export
+Default format must look like the uploaded Cafe / Service workbook
+Row 1: SI.NO | ITEM | PICTURE | [MONTH] CLOSING (merged over the stock columns). Row 2 under the month: PREV 
+MONTH STOCK | NEW STOCK | DAMAGE | ACTUAL. Pictures should be small thumbnails in the Picture column. 
+Section/property title and generated date should be printed above or in a header area.
+SI.NO ITEM PICTURE PREV MONTH STOCK NEW STOCK DAMAGE ACTUAL
+1 COFFEE MUG thumbnail 24 6 2 27
+2 WATER JUG thumbnail 12 0 1 11
+Extended Master export may append: Specification | Breakage Qty | Unit Rate | Purchase Value | Breakage Value | Expected | 
+Difference. The first seven columns remain unchanged so the familiar spreadsheet format is preserved.
+7.3 Breakage report layout
+S.No Item Section Broken Qty Reason Photo Rate Loss Value Staff Date
+1 Wine Glass Cafe 2 Accidental drop thumb 180₹ 360₹ Staff 01 2026-09-12
+2 Starter Plate Service 1 Handling damage thumb 240₹ 240₹ Staff 03 2026-09-17
+ PDF/print version should include report title, property, section, month, total broken quantity, total loss amount and 
+signature lines for Manager / MD if desired.
+ Month-wise breakage report must include the captured photo for every event. Excel can use thumbnails; PDF can 
+use larger thumbnail cells or one detail card per event when photo readability is important.
+ All generated files should use predictable names, e.g. Travelicious_Cafe_Inventory_2026-09.xlsx and 
+Travelicious_Breakage_2026-09.pdf.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+8. Unit Rate, Purchase Value and Breakage Value
+8.1 Recommended rate model
+Value Rule
+Item default/latest rate Most recently accepted unit purchase/replacement rate. Editable by Master.
+Stock addition rate Rate entered for that purchase transaction; never changes after submission except through an 
+audited correction.
+Purchase transaction value Quantity added x transaction unit rate.
+Breakage event rate Snapshot the item latest/default unit rate at the moment breakage is submitted.
+Breakage loss value Broken quantity x rate snapshot.
+Monthly purchase value Sum of all addition transaction values in the month.
+Monthly breakage value Sum of all breakage loss values in the month.
+Yearly values Sum the closed monthly values; old results do not change when current rates change.
+Missing-rate behavior
+If an item has no rate, allow the inventory action but flag the event as RATE MISSING in Master reports. Do not assume 
+zero is a real rate. The Master can later set a rate and create a controlled valuation correction if needed.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+9. Database Design / Data Model
+9.1 Core tables
+Table Important fields Purpose
+users id, auth_id, name, username/email, role, active, created_at Login profile; one Master initially, 
+multiple staff
+properties id, code, name, active Travelicious; Travellers Cavern
+sections id, property_id, code, name, sort_order, active Store/Service/Cafe/Games/Admin; 
+future additions
+items id, item_code, property_id, section_id, name, category, specification, unit, 
+default_rate, active, created_by, timestamps Current item master
+item_photos id, item_id, storage_key, width, height, bytes, mime, sha256, is_primary, 
+created_at Compressed item photos
+inventory_transactions id, item_id, property_id, section_id, type, qty_delta, unit_rate, value, occurred_at, 
+reference_type/id, note, created_by Immutable stock ledger
+breakage_events id, item_id, property_id, section_id, qty, reason_code, reason_text, 
+unit_rate_snapshot, loss_value, photo_id, occurred_at, created_by Breakage evidence + valuation
+monthly_counts id, property_id, section_id, year, month, status, started_at, submitted_at, 
+closed_at, submitted_by, closed_by One header per section/month
+monthly_count_lines id, monthly_count_id, item_id, prev_qty, added_qty, damage_qty, breakage_qty, 
+expected_qty, actual_qty, difference_qty, rate_snapshot, note Immutable close snapshot
+report_archives id, report_type, property_id, section_id, year, month, format, storage_key, 
+checksum, generated_at Archived month/year exports
+audit_logs id, actor_id, action, entity_type, entity_id, before_json, after_json, reason, 
+created_at Administrative and correction history
+app_settings key, value_json, updated_by, updated_at Currency, reasons, compression limits, 
+feature flags
+9.2 Ledger transaction types
+Type qty_delta Created by
+OPENING Positive New item initial quantity
+PURCHASE / ADDITION Positive Add Stock workflow
+BREAKAGE Negative Breakage workflow
+DAMAGE Negative Damage workflow / Master
+ADJUSTMENT + Positive Master correction with reason
+ADJUSTMENT - Negative Master correction with reason
+TRANSFER OUT Negative Optional future section transfer
+TRANSFER IN Positive Optional future section transfer
+9.3 Essential indexes and constraints
+ Unique monthly count: (property_id, section_id, year, month).
+ Unique item_code; index items(property_id, section_id, active) and lower(name) for search.
+ Index inventory_transactions(item_id, occurred_at) and (property_id, section_id, occurred_at).
+ Index breakage_events(property_id, section_id, occurred_at) and created_by.
+ Use numeric/decimal type for rates and money; never floating-point.
+ Use database foreign keys and transaction-level integrity. Item archive must not cascade-delete history.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+10. API / Backend Functions and Execution Rules
+Endpoint / function Role Purpose
+POST /auth/login All Authenticate and return role/session
+GET /properties All Return both active properties
+GET /sections?property= All Return sections for selected property
+GET /items All Search items; response is role-filtered so staff receives no 
+balance/variance fields
+POST /items Master + Staff Create item; staff payload/response restricted
+PATCH /items/:id Master Edit item master
+POST /stock-additions Master + Staff Create positive ledger transaction with rate/value
+POST /breakages Master + Staff Create breakage event + negative transaction atomically
+POST /monthly-counts/start Master + Staff Create/resume current section count
+PUT /monthly-counts/:id/lines/:item Master + Staff Autosave actual physical count
+POST /monthly-counts/:id/submit Master + Staff Validate completion; staff lock
+POST /monthly-counts/:id/close Master Calculate/freeze snapshot and generate reports
+POST /monthly-counts/:id/reopen Master Require reason; audit
+GET /reports/inventory Master Monthly inventory data
+GET /reports/breakage Master Breakage events/value/photos
+POST /exports Master Generate Excel/PDF file and optional archive
+GET /audit-logs Master Admin audit history
+10.1 Atomic breakage pseudo-logic
+validate(role, property, section, item, qty, reason, photo)
+photo_key = store_compressed_photo(...)
+BEGIN DATABASE TRANSACTION
+  rate = get_latest_item_rate(item_id)
+  event = insert breakage_event(qty, reason, photo_key, rate)
+  insert inventory_transaction(type="BREAKAGE", qty_delta=-qty, reference=event.id)
+  insert audit_log(...)
+COMMIT
+return {breakage_reference}
+// staff response MUST NOT include resulting stock balance
+10.2 Permission enforcement
+Hide data at API/database level, not only in the screen
+Staff restrictions must be enforced in backend authorization and database row-level security. Removing a column from the 
+mobile UI is not enough if the API still returns it.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+11. Camera Access, Image Compression and Storage
+11.1 Mobile camera behavior
+ Use <input type="file" accept="image/*" capture="environment"> as the reliable mobile browser fallback; optionally 
+add getUserMedia for a custom camera screen.
+ Camera access requires HTTPS in production. The app should be installable as a PWA so staff can open it like a 
+normal phone app.
+ Always show image preview with Retake / Use Photo before upload.
+ Item creation requires a primary item photo. Breakage requires a photo before Submit.
+ For existing imported items that have no source photo, show a visible Photo Needed badge to Master until captured.
+11.2 Compression specification
+Step Recommended rule
+Decode Read image client-side and correct orientation.
+Resize Maximum long edge 1600 px for item/breakage photos; preserve aspect ratio.
+Format WebP quality about 0.72 when supported; otherwise JPEG quality about 0.72.
+Target size Aim for approximately 150-350 KB; hard server limit around 1 MB after compression.
+Metadata Strip EXIF/GPS metadata unless explicitly needed.
+Thumbnail Generate 320 px thumbnail for list/report screens.
+Filename Random UUID, never trust original filename.
+Validation Server rechecks MIME type, dimensions and file signature before accepting.
+11.3 Storage layout
+private-bucket/
+  properties/{property_id}/
+    items/{item_id}/primary/{uuid}.webp
+    breakages/{YYYY}/{MM}/{breakage_id}/{uuid}.webp
+  reports/{YYYY}/{MM}/{report_id}.pdf
+  reports/{YYYY}/{MM}/{report_id}.xlsx
+ Store only storage keys in the database, not base64 image data.
+ Use private object storage and signed URLs so inventory photos are not publicly enumerable.
+ Keep compressed photos for the same six-year retention window as their records.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+12. Security, Audit, Six-Year Retention and Backup
+12.1 Retention policy
+Data type Minimum retention Deletion rule
+Monthly snapshots 72 months No automatic deletion before 6 years
+Inventory transactions 72 months Archive, do not hard delete
+Breakage records + photos 72 months Keep photo with event
+Generated monthly/yearly reports 72 months Store immutable archived copy at month close
+Audit logs 72 months minimum Master cannot edit log entries
+Disabled users/items/sections History retained Soft delete / inactive status only
+12.2 Security checklist
+ HTTPS everywhere; secure cookies; CSRF protection where applicable; strong Content Security Policy.
+ Use managed authentication (recommended Supabase Auth) and server-side role checks.
+ Database Row Level Security policies restrict staff responses and mutation scope.
+ Master account optional 2FA; session revocation when staff is disabled.
+ Private image bucket and short-lived signed URLs.
+ Input validation on client and server; rate limiting on login and upload endpoints.
+ Audit every month close/reopen, adjustment, user change, item edit and report regeneration.
+ Nightly database backups; keep at least 30 daily restore points plus monthly archive/export snapshots. Test 
+restoration at least twice per year.
+12.3 Six-year archive strategy
+Keep live history queryable
+Six years is only 72 monthly periods, so normal PostgreSQL can keep this data online. Do not move older years into 
+spreadsheets as the primary source. Archived PDF/XLSX files are convenient copies, but the database ledger remains the 
+authoritative history.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+13. Uploaded Excel Workbook: Migration and Initial Data
+13.1 Source workbook audit
+Source Initial target Item rows Rows with rich-image 
+metadata Notes
+Cafe report Travelicious -> Cafe 61 60 1 row without picture metadata: Coffee cup
+SERVICE PRINT Travelicious -> Service 123 121 2 rows without picture metadata: HAND 
+DRYER, LUDIO
+Embedded media Used by both sheets - 168 168 unique JPEG media files (~115.6 MB 
+uncompressed-in-package file sizes)
+Important: The source item labels should be imported exactly as written first. The Master can later standardize spelling/case using the 
+website while history continues to reference the same item ID.
+13.2 Rich-image extraction plan for this workbook
+25. Open the .xlsx as a ZIP archive (do not rely only on displayed #VALUE! picture cells).
+26. Read the Picture column cell metadata value (vm) in the worksheet XML.
+27. Resolve vm through xl/metadata.xml to the rich-value index.
+28. Read xl/richData/rdrichvalue.xml to obtain the local image identifier.
+29. Resolve that identifier through xl/richData/richValueRel.xml and xl/richData/_rels/richValueRel.xml.rels to 
+xl/media/imageNN.jpeg.
+30. Compress the extracted JPEG to the website image standard, upload it, and attach it to the imported item.
+31. When no image metadata exists, import the item with Photo Needed status and let staff/Master capture a fresh 
+image later.
+13.3 Initial import mapping
+Workbook sheet Property Section Action
+Cafe report Travelicious Cafe Import all 61 item rows and linked photos
+SERVICE PRINT Travelicious Service Import all 123 item rows and linked photos
+Damage / Missing report layout in 
+Sheet1 Reference only Breakage report design
+Use its concepts: inventory number, item, count, 
+location and reason; extend with 
+photo/rate/value/staff/date
+Games section cleanup
+The SERVICE PRINT source contains several obvious game-related names. To avoid changing your source data 
+automatically, import them to Service first and provide a Master bulk-move tool so they can be moved to Games after 
+review.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+14. Recommended Technical Architecture and Deployment
+14.1 Production stack
+Layer Recommended technology Why it fits
+Frontend Next.js + React + TypeScript Responsive, fast, AI-friendly codebase and strong server/client 
+integration
+UI Tailwind CSS + accessible component library Fast mobile/desktop implementation with consistent controls
+PWA Web app manifest + service worker Installable on staff phones; supports local draft/offline resilience
+Backend Next.js server routes/actions Single TypeScript project; easy authorization and export endpoints
+Database PostgreSQL (Supabase) Reliable relational ledger, SQL reporting, managed backups
+Authentication Supabase Auth Secure password/session management
+File storage Supabase Storage private buckets Private item/breakage images and archived reports
+Hosting Vercel + Supabase Simple production deployment and HTTPS
+Exports ExcelJS (XLSX) + PDF renderer such as 
+PDFKit/React-PDF Generate familiar Excel exports and photo-rich reports
+14.2 Application architecture
+Mobile Staff Browser / PWA         Master Laptop Browser
+            │                              │
+            └──────── HTTPS / Next.js ─────┘
+                           │
+                 Authorization Layer
+                           │
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+  PostgreSQL          Private Storage      Export Worker
+ ledger/snapshots     photos/reports       XLSX + PDF
+       │                   │                   │
+       └──────────── Audit + 6-year history ───┘
+14.3 Environments
+ Development: sample data only.
+ Staging/UAT: copy of structure, not production passwords; used for staff testing on real phones.
+ Production: private database/storage, automated backups, custom domain and HTTPS.
+ Use environment variables for keys; never place service-role keys in browser JavaScript.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+15. Development Phases, Testing and Go-Live
+Phase Build / outcome
+Phase 1 - Foundation Project setup, database, auth, properties/sections, Master + Staff roles, responsive navigation
+Phase 2 - Item Master Item CRUD, specifications, rates, photo capture/compression/storage, search
+Phase 3 - Ledger Stock additions, damage/breakage transactions, atomic stock updates, audit log
+Phase 4 - Monthly Count Blind staff count, autosave, submit, Master variance review, close/reopen snapshot
+Phase 5 - Reports Monthly inventory, breakage, yearly totals, Excel/PDF exports, archived reports
+Phase 6 - Workbook Migration Import Cafe/Service items and extract source images; flag missing photos
+Phase 7 - Hardening RLS/security review, mobile offline resilience, backups, performance and error handling
+Phase 8 - UAT / Launch Real staff testing, Master sign-off, production deployment, initial month close
+15.1 Critical test cases
+Test Expected result
+Login Staff cannot access Master URLs/API fields even by typing the URL manually.
+Blind count Staff count screen never returns previous/expected/difference in API response.
+Breakage atomicity If photo/database action fails, stock is not deducted halfway.
+Double tap Submitting Breakage twice quickly creates only one event/transaction.
+Rate snapshot Changing an item rate later does not change old breakage values.
+Month close Closed actual becomes next month previous stock exactly.
+Reopen Reopen requires Master + reason and is visible in audit log.
+Missing photo Imported item with no photo is usable but clearly flagged for photo capture.
+Export Excel inventory columns match the required familiar layout and thumbnails render correctly.
+Six-year query Reports can filter old months/years without data loss.
+Mobile camera Android Chrome and iPhone Safari can capture/upload compressed images over HTTPS.
+Network loss Staff count drafts survive temporary connection loss and sync without duplicate lines.
+15.2 Performance targets
+ Common mobile screens should become usable in about 2 seconds on a normal 4G/Wi-Fi connection after login.
+ Use lazy-loaded thumbnails, not full-resolution images in lists.
+ Paginate large audit/breakage histories; do not load six years into one browser response.
+ Generate large Excel/PDF reports server-side; show clear progress state and prevent duplicate export clicks.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+16. AI-Builder Implementation Brief and Acceptance 
+Criteria
+Instruction to the coding AI / developer
+Build the production application described in this document. Do not simplify the role permissions, monthly snapshot rules, 
+breakage atomic transaction, photo compression, rate snapshots, export compatibility or six-year retention. Use the 
+uploaded workbook as the migration source for initial Travelicious Cafe and Service items.
+16.1 Build order for an AI coding agent
+32. Create database migrations and seed both properties plus initial sections.
+33. Implement authentication, Master/Staff authorization and Row Level Security.
+34. Implement item master and private photo storage with client-side compression.
+35. Implement stock ledger and derived stock query/view.
+36. Implement Add Stock and Breakage workflows with atomic transactions and audit logs.
+37. Implement monthly blind counting, submit/review/close/reopen logic and immutable snapshots.
+38. Implement Master reports and Excel/PDF export templates.
+39. Implement workbook migration script including Excel rich-image extraction.
+40. Implement PWA/offline count drafts and mobile polish.
+41. Run automated tests + role security tests + real-device camera tests before production deployment.
+16.2 Definition of Done
+ PASS when: One Master login can access every module and both properties.
+ PASS when: Multiple Staff logins can access both properties and perform permitted actions.
+ PASS when: Staff cannot view stock difference/variance; backend responses enforce this, not just UI hiding.
+ PASS when: Travelicious contains Store, Service, Cafe, Games, Admin; Travellers Cavern starts with General and 
+supports added sections.
+ PASS when: New items support specification, quantity, rate and compressed camera photo.
+ PASS when: Breakage requires property, section, item, photo, quantity, reason; it immediately creates a stock 
+deduction.
+ PASS when: Monthly inventory preserves Previous, New Stock, Damage/Breakage and Actual; Master gets 
+Expected and Difference.
+ PASS when: Monthly and yearly purchase/breakage values use immutable transaction/event rate snapshots.
+ PASS when: Section-wise, property-wise and combined reports export to Excel/PDF.
+ PASS when: Default Excel inventory layout matches the uploaded workbook structure.
+ PASS when: Breakage reports are month-wise and include photos, reason, staff, rate and loss value.
+ PASS when: Closed monthly records and photos remain retrievable for at least six years.
+ PASS when: Cafe and Service source item lists are imported from the supplied workbook; available embedded 
+images are migrated and missing images are flagged.
+ PASS when: All critical changes and corrections are auditable.
+ PASS when: Mobile staff flow is usable one-handed and Master desktop tables are efficient to filter/search.
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Appendix A - Travelicious Cafe Items from Uploaded 
+Workbook
+61 item rows found in the Cafe report sheet. Import target: Travelicious > Cafe. Source labels are preserved exactly as written.
+Cafe items Cafe items Cafe items
+1. BILL FOLDER 22. ICE CREAM SCOOPER 43. TABLE SPRAY
+2. BILL PRINTER 23. ICE TRAY BLUE 44. TEA CUP
+3. BLACK COFFEE CUP 24. ICE TRAY GREEN 45. TEA PAN
+4. BLENDER 25. INDUCTION COOKTOP 46. TEA SPOON
+5. BOOKS 26. JUICE GLASS2 47. TISSUE HOLDER
+6. CANDLE HOLDER 27. JUICE GLASS4 48. TRAY
+7. CEARAMIC JAR 28. KNIFE 49. WATER JUG
+8. COCKTAIL GLASS (MARTINI GLASS 1) 29. MARTINI GLASS 2 50. WINE GLASS
+9. COCKTAIL SHAKER 30. NORMAL WATER GLASS 51. FLOWER POT
+10. COFFEE MUG 31. PUG MUSHER 52. FLOWER VASE SMALL
+11. COFFEZA FROTHINO  MILK  FROTHER 32. QUARTER PLATE 53. FLOWER GLASS VASE
+12. DINNER PLATE 33. RED-BROWN CHAIR 54. ICE CREAM GLASS 2
+13. FIBER TABLE 34. ROUND HAMPER 55. Mouth PS   Holder
+14. FLOWER VASE 35. ROUND TABLE 56. Straw Spoon Tray
+15. FROTHER 36. SCISSORS 57. Spoon Tray
+16. FROTHER STAND 37. SHORT GLASS 58. Table Mate
+17. FRUIT BALLER 38. SS MUG 59. Small Table
+18. GREEN CUTTING BORD 39. SS POT 60. ASH TRAY
+19. JUICE GLASS 40. SS TEA STRAINER 61. Coffee cup [PHOTO NEEDED]
+20. HOOKAH 41. STATER PLATE
+21. ICE CREAM BOWL 42. STEAK KNIFE
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Appendix B - Travelicious Service Items from Uploaded 
+Workbook
+123 item rows found in SERVICE PRINT. Import target: Travelicious > Service initially. Source labels are preserved exactly as written; 
+game-related items may be bulk-moved to Games after Master review.
+Service items Service items Service items
+1. BREAD BASKET 42. curry  tuk 83. BURGER PLATE WOOD
+2. Soup bowl 1 43. tea holder tray 84. BROWNIE PLATE SET
+3. starter plate 1 44. ARABIAN LAMP 85. PIZZA  WOODEN BASE
+4. burger plate 45. handwash bottle 86. PASTA  BOWL 2
+5. dinner plate 46. lamp 87. SAUCER 2
+6. cereal Dispenser 47. candle light dinner 88. QUARTER PLATE
+7. chafing dish 48. candle holder 89. Dip Bowl 1
+8. Catering plate 49. bill book 90. Dip Bowl 2
+9. starter plate 2 50. sweet shoup bowl 91. Sizzler plate set
+10. dinner plate 1 51. BALL 92. SOUP Spoon
+11. starter plate 3 52. frisbee —. HAND DRYER [PHOTO NEEDED]
+12. starter plate 4 53. badminton 93. walkie Talkie charger
+13. starter plate 5 54. shuttlecock 94. TIC TAK TOE
+14. Saucer 1 55. caram boad 95. LUDIO [PHOTO NEEDED]
+15. Saucer 3 56. PLASTIC  WATER   GLASS 96. UNO
+16. water jug 57. PLANT  POT 97. JENGA
+17. chinese set 58. FOOTED  BOWL 98. MONOPOLY
+18. Cruet set 59. MINAKARI  HAFT  SIN 99. FOOSBALL
+19. fork 60. SHUI COIN TREE  WEALTH 100. DOMINOES
+20. steak knife 61. BAND VIDYA SAGAR 101. CHESS
+21. tea spoon 62. RESERVED  BOARD 102. FLOOR IN A ROW
+22. ap spoon ALL 63. FLOWER  POT 103. BLOCK 2
+23. desert  spoon 64. ARTIFICAL SET 104. MIKADO
+24. service spoon 65. CLEAR  CRYSTAL SHORT  GLASS 105. JIGSAW PUZZLES
+25. flakes dispenser set 66. BALL DARTED CLEAR  GLASS 106. BLOCKS 3
+26. sachet holder 67. PLASTIC DUSTBIN 107. JIGSAW PUZZLES 2
+27. tissue box 68. STAINLESS STEEL DUSTBIN 108. KIDS BLOCKS
+28. water glass 69. OPR STAINLESS ASH DUSTBIN 109. SNAKE & LADER - LUDO
+29. rice and curry bowl 70. PRATHNA ELECTRIC BLACK COATED 110. SHINETOY WOODEN PUZZLE
+30. pasta bowl 71. WATER CAMPER JUG 111. STEEL COTORY
+31. square bowl 72. GLASS MASON JAR DRINK 112. STEEL SMALL COTORY
+32. kettle 73. TABLE FAN 113. STEEL GLASS
+33. table wiper 74. UMBRELLA 114. THALI
+34. table spray 75. STAN FAN 115. NAME TAG
+35. straw holder 76. BROWN LION OBLONG 116. BIRYANI BOWL
+36. kadai bowl 77. SWEET BOTTLE 117. STEEL GLASS 2
+37. kadai plate 78. WALKY TALKY 118. STEEL GLASS 3
+38. service salver 79. CHAIR 119. STEEL GLASS 4
+39. service tray 1 80. FLOWER  POT 120. STEEL BOWL
+40. rice cutter 81. Momo Pot Big 121. EXTRA GLASS
+41. cassarole 82. MOMO POT SMALL 122. BREAKFAST GLASS
+
+Travellers Cavern + Travelicious | Inventory Management System Development Plan | Version 1.0
+Appendix C - Suggested Breakage Reasons and Validation 
+Rules
+C.1 Default reason list
+Code Staff label Note rule
+ACCIDENT Accidental drop / handling Optional note
+STAFF_HANDLING Staff handling damage Optional note
+GUEST Guest-related damage Optional note; avoid personal data unless needed
+WEAR Wear and tear Optional note
+OPERATION Kitchen / service operation Optional note
+MISSING Missing / unable to locate Master review recommended
+UNKNOWN Unknown Reason note required
+OTHER Other Reason note required
+C.2 Validation rules
+Field Rule
+Quantity Integer > 0 for piece-counted items; support decimal only if future units require it.
+Actual monthly count Integer >= 0; zero must be explicit.
+Rate Decimal >= 0, INR, max sensible digits; blank allowed with RATE MISSING flag.
+Breakage photo Required; accepted image types only; compressed before storage.
+Reason Required dropdown; note mandatory for Other/Unknown.
+Section Must belong to selected property and be active.
+Item Must belong to selected property/section and be active, unless Master is viewing old history.
+Closed month No ordinary staff transaction may be backdated into it. Master must reopen or post a current 
+correction with audit reason.
+END OF DEVELOPMENT SPECIFICATION
+Build against the acceptance criteria above and validate the finished system on both mobile and laptop before production use.

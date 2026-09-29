@@ -1,0 +1,25 @@
+const {chromium}=require('/Users/nived/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const browser=await chromium.launch({headless:true,channel:'chrome'});const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5056');
+ await page.getByRole('link',{name:'Continue with Google'}).waitFor();
+ await page.getByLabel('Username',{exact:true}).fill('qaowner');await page.getByLabel('Password',{exact:true}).fill('local-testing-password');await page.getByRole('button',{name:'Sign in',exact:false}).click();
+ await page.getByRole('heading',{name:'Inventory overview',exact:true}).waitFor();
+ await page.getByRole('navigation').getByRole('button',{name:'Team & access',exact:true}).click();
+ await page.getByRole('button',{name:'+ Add team member'}).click();
+ const user='scoped-'+Date.now();await page.getByLabel('Full name',{exact:true}).fill('Cafe Counter');await page.getByLabel('Username',{exact:true}).fill(user);await page.getByLabel('Initial password',{exact:true}).fill('qa-staff-password');
+ await page.locator('[data-permission="add_items"]').uncheck();await page.locator('[data-permission="purchases"]').uncheck();await page.locator('[data-permission="breakage"]').uncheck();await page.locator('#all-sections').uncheck();
+ for(const el of await page.locator('[data-scope]').all())await el.uncheck();await page.locator('[data-scope="3"]').check();
+ await page.screenshot({path:'tmp/qa/access-editor-desktop.png',fullPage:true});await page.getByRole('button',{name:'Save changes'}).click();await page.locator('dialog').waitFor({state:'hidden'});
+ await page.getByRole('cell',{name:user+' · Username & password',exact:false}).waitFor();
+ await page.getByRole('button',{name:'+ Add team member'}).click();await page.getByLabel('Full name',{exact:true}).fill('Operations Admin');await page.getByLabel('Username',{exact:true}).fill('admin-'+Date.now());await page.getByLabel('Initial password',{exact:true}).fill('qa-admin-password');await page.getByLabel('Account role').selectOption('ADMIN');await page.getByLabel('Full administrator access',{exact:true}).check();await page.getByRole('button',{name:'Save changes'}).click();await page.locator('dialog').waitFor({state:'hidden'});
+ await page.screenshot({path:'tmp/qa/team-access-desktop.png',fullPage:true});
+ await page.getByRole('navigation').getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#sign-out').click();
+ await page.getByLabel('Username',{exact:true}).fill(user);await page.getByLabel('Password',{exact:true}).fill('qa-staff-password');await page.getByRole('button',{name:'Sign in',exact:false}).click();await page.getByRole('heading',{name:'Your daily workspace',exact:true}).waitFor();
+ for(const name of ['Reports','Team & access','Breakage'])if(await page.getByRole('navigation').getByRole('button',{name,exact:true}).count())throw Error('Unauthorized nav '+name);
+ if(await page.locator('[data-additem],[data-move="PURCHASE"],[data-move="BREAKAGE"]').count())throw Error('Unauthorized action remains visible');
+ await page.getByRole('navigation').getByRole('button',{name:'Inventory',exact:true}).click();await page.getByRole('heading',{name:'Item catalogue'}).waitFor();if(await page.locator('th').filter({hasText:'Unit rate'}).count())throw Error('Staff rates visible');
+ await page.getByRole('navigation').getByRole('button',{name:'Monthly count',exact:true}).click();await page.getByRole('heading',{name:'Cafe',exact:true}).waitFor();if(await page.locator('.section-card').count()!==1)throw Error('Sections not restricted');
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'tmp/qa/scoped-staff-mobile.png',fullPage:true});if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Mobile overflow');
+ console.log(JSON.stringify({result:'PASS',pageErrors:errors,checks:['Google login entry','create scoped staff','create full-access admin','restricted navigation','blind catalogue','Cafe-only counts','mobile layout']}));await browser.close();if(errors.length)process.exit(1);
+})().catch(e=>{console.error(e);process.exit(1)});

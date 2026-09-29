@@ -1,0 +1,24 @@
+# Environments
+.venv/
+.venv-*/
+env/
+venv/
+ENV/
+
+# Secrets, sensitive files & credentials
+data/
+*.key
+.env
+google-auth.local.json
+
+# Cache & temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+tmp/
+.DS_Store
+**/.DS_Store
+Thumbs.db

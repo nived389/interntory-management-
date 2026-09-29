@@ -1,0 +1,44 @@
+name: CI & Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: "pip"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Pytest Test Suite
+      run: |
+        pytest -v
+
+    - name: Verify App Initialization & Smoke Test
+      run: |
+        python -c "
+        import app
+        with app.app.test_client() as c:
+            res = c.get('/')
+            assert res.status_code == 200, f'Expected 200, got {res.status_code}'
+            session_res = c.get('/api/session')
+            assert session_res.status_code == 200, f'Expected 200, got {session_res.status_code}'
+            assert 'csrf' in session_res.json, 'CSRF token missing in session'
+        print('✅ Smoke test passed: Flask app initializes and responds cleanly.')
+        "

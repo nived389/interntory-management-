@@ -1,0 +1,30 @@
+{
+  "name": "Travelicious Inventory Management",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.testing.pytestArgs": [
+          "tests"
+        ]
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "qwtel.sqlite-viewer"
+      ]
+    }
+  },
+  "forwardPorts": [5055],
+  "portsAttributes": {
+    "5055": {
+      "label": "Inventory App",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt",
+  "postAttachCommand": "echo 'Run: python app.py (access on port 5055)'"
+}

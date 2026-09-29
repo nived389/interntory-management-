@@ -1,0 +1,16 @@
+{
+  "name": "Travelicious Inventory Management",
+  "short_name": "Travelicious",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f3",
+  "theme_color": "#173f35",
+  "icons": [
+    {
+      "src": "/static/travelicious-logo.png",
+      "sizes": "6250x6250",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
