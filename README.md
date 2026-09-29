@@ -1,8 +1,16 @@
 # Cavern & Co. Inventory
 
-A working local inventory application for **Travelicious** and **Travellers Cavern**, built from the supplied development plan. Uses a Flask backend, SQLite database and responsive browser interface. No cloud account is needed to run it locally.
+A working inventory management application for **Travelicious** and **Travellers Cavern**, built with Flask, SQLite, and a mobile-responsive interface.
 
-## Start
+### 🌐 Live Public Demo Link
+Access the live running instance from any device:
+* **Public URL**: [https://trials-yarn-comment-commitments.trycloudflare.com](https://trials-yarn-comment-commitments.trycloudflare.com)
+* **Master Login**: `traveliciousrestaurant@gmail.com` | Password: `Travelicious@2026!`
+* **Staff Login**: `riya` | Password: `riya@123`
+
+---
+
+## Start Locally
 
 Double-click **start.command**, or run with Python 3.11+ / OpenSSL:
 
