@@ -1,31 +1,47 @@
-# Online hosting preparation
+# Free online hosting: PythonAnywhere
 
-Status: deployment files prepared locally. No cloud resources created and no company data uploaded.
+Status: configuration prepared locally. No account provisioned, company data uploaded, or live deployment verified.
 
-## Recommended initial setup
+## Fit and limits
 
-Run this Flask app on a paid Render web service with a persistent disk, or an equivalent single-server Docker host. Keep SQLite, photos, saved reports and encryption keys together on that disk. Do not run multiple app instances or place the data directory on ephemeral storage. Start with one Gunicorn worker, as the current login-attempt counters are process-local.
+The existing Flask application can use SQLite and photos in private persistent files on PythonAnywhere. The free plan provides one web app with one worker and 512 MiB total disk space. The web app has a one-month expiry: renew it from the hosting dashboard before expiry. Current business data is approximately 24 MB; Python dependencies, uploaded source, future photos, reports and backups also consume the quota. Check actual usage after installation. This is a small initial deployment, not unlimited storage or guaranteed availability.
 
-- Build: the repository Dockerfile (Python 3.12).
-- Persistent disk mount: `/var/lib/travelicious`.
-- Environment: `INVENTORY_DATA=/var/lib/travelicious`, `HTTPS=1`, `TZ=Asia/Kolkata`, `PORT=10000`.
-- HTTPS must terminate at the hosting service/reverse proxy. Never expose the development server.
-- Repository/image includes application code only. `.dockerignore` excludes company data, private configuration and local keys.
-- Before starting: restore the existing data folder into the persistent mount. The production entry point deliberately refuses to start without the existing database and session key.
+Use the included PythonAnywhere subdomain and enable Force HTTPS. Keep database files and photos outside public static mappings. Free outbound networking is restricted; the current username/password login does not need an external identity service.
 
-## Migration order
+## Setup
 
-1. Choose the provider and approve its actual plan/storage charges. Use a private source repository.
-2. Provision persistent storage and an HTTPS web service. Keep initial access restricted while restoring.
-3. Schedule a brief write pause on the local app. Stop the local app, then privately transfer the complete `data` directory to the mounted disk. Preserve `inventory.db`, `photos`, `reports`, `session.key`, and `password-vault.key` if present. Keep secrets out of Git and container images.
-4. Start the production service. Verify master login, staff section access, existing photos and item counts, approval/correction cycles and PDF/Excel downloads. Test phone camera capture over HTTPS.
-5. Make the cloud URL the single shared system. Do not keep entering data into a separate local database after cutover.
-6. Configure regular SQLite-consistent backups plus photo/report backups to a separate private storage location. Keep the password-vault key backed up separately and test restoring it. A persistent disk alone is not an independent backup.
+1. Create a free account at https://www.pythonanywhere.com/ and sign in. Choose a username suitable for the public website address.
+2. Upload application source to `/home/YOUR_USERNAME/travelicious`. Exclude `data`, `.git`, `.venv*`, `tmp`, caches, `.env*` and `google-auth.local.json`. Do not upload local virtual environments.
+3. In a Bash console, create a Python 3.12 virtual environment (or a supported matching version), then install dependencies:
 
-Existing downloadable application backups omit the password-vault key. They are not sufficient on their own to preserve password-reveal functionality when moving servers. A stopped, full-directory migration preserves it.
+   ```sh
+   mkvirtualenv --python=/usr/bin/python3.12 travelicious
+   cd ~/travelicious
+   pip install --no-cache-dir -r requirements.txt
+   ```
 
-## Later scaling
+4. Add a web app using Manual Configuration with the same Python version. Set its virtualenv to `/home/YOUR_USERNAME/.virtualenvs/travelicious`.
+5. Replace the generated WSGI configuration contents with `deploy/pythonanywhere_wsgi.py`. It sets the private storage directory, secure cookies and India timezone before importing the app. Do not run `app.run()` or Gunicorn on this provider.
+6. Enable Force HTTPS on the Web tab. Do not map the data directory as a static URL.
+7. Migrate existing data as below, then reload the web app. `production.py` deliberately refuses to start without the existing database and session key.
+8. Check disk quota after installing dependencies. Remove upload archives after successful verification, retaining an independent private local backup.
 
-A managed PostgreSQL database and private object storage can separate records and photos and support multiple app instances. This requires a deliberate SQLite-to-PostgreSQL code/data migration; changing a connection URL is not enough for the current app.
+## Data migration and cutover
 
-Provider references: https://render.com/docs/deploy-flask and https://render.com/docs/disks
+1. Arrange a brief write pause. Stop the local application before copying its database and files so the snapshot is consistent.
+2. Keep a complete private local backup. Transfer `inventory.db`, `photos/`, `reports/`, `session.key`, and `password-vault.key` into `/home/YOUR_USERNAME/travelicious-data`. Preserve any required historical backups separately; never upload plaintext credential notes such as `staff2-login.txt`.
+3. Restrict the private directory to the account user and key files to owner read/write. Keep secrets out of Git, source archives and public static paths.
+4. Reload the web app. Verify existing master/staff login, item/photo totals, assigned sections, blind counts, approval/correction cycles, report downloads and mobile camera capture over HTTPS.
+5. Use the online site as the single shared system after acceptance. Do not enter new records into a separate local copy.
+6. Download regular application backups to private off-host storage. Back up the password-vault key separately: normal application backup downloads omit it. Test recovery. New free accounts do not include scheduled tasks, so do not assume automatic daily backups exist.
+
+## Other hosting files
+
+The Dockerfile and requirements-production.txt remain available for a future host supporting Docker and persistent disks. They are not used by PythonAnywhere. Render free storage is ephemeral and is unsuitable for this app's local database/photos. PostgreSQL plus object storage would require a separate code and data migration.
+
+## Official references
+
+- https://help.pythonanywhere.com/pages/FreeAccountsFeatures/
+- https://help.pythonanywhere.com/pages/Flask/
+- https://help.pythonanywhere.com/pages/DiskQuota/
+- https://help.pythonanywhere.com/pages/HTTPSSetup/
