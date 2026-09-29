@@ -4,6 +4,8 @@ from pathlib import Path
 from cryptography.fernet import Fernet,InvalidToken
 
 def cipher(data):
+    if os.environ.get('PASSWORD_VAULT_KEY'): return Fernet(os.environ['PASSWORD_VAULT_KEY'].encode())
+    if os.environ.get('DATABASE_URL'): raise RuntimeError('Cloud mode requires the existing PASSWORD_VAULT_KEY')
     path=Path(data)/'password-vault.key'
     if not path.exists():
         try:

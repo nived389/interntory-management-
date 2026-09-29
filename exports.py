@@ -1,4 +1,5 @@
 import io
+import cloud_files
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -14,6 +15,8 @@ def make_export(data,kind,fmt,title,root):
         headers=['SI.NO','Item','Section','Quantity','Reason','Photo','Rate INR','Value INR','Staff','Date','Note','Username','User ID']
         values=[[n,r['name'],r.get('section',''),abs(r['qty']),r.get('reason',''),'',None if r['rate'] is None else r['rate']/100,None if r['rate'] is None else abs(r['qty'])*r['rate']/100,r.get('staff',''),r['date'],r.get('note',''),r.get('username',''),r.get('submitter_id',r.get('actor',''))] for n,r in enumerate(data,1)]; piccol=6
     if kind=='inventory' and any(r.get('status') not in (None,'CLOSED') for r in data): title+=' [LIVE PREVIEW - NOT CLOSED]'
+    for row in data:
+        if row.get('photo'): cloud_files.local(root,'photos/thumb-'+row['photo'])
     out=io.BytesIO()
     if fmt=='xlsx':
         from openpyxl import Workbook

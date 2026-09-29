@@ -8,20 +8,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ImageOps, UnidentifiedImageError
 import access
 import credential_vault
+import cloud_files
 
 ROOT=Path(__file__).parent
 DATA=Path(os.environ.get('INVENTORY_DATA', ROOT/'data')); DATA.mkdir(exist_ok=True,parents=True)
 for folder in ('photos','reports'): (DATA/folder).mkdir(exist_ok=True)
 secret=DATA/'session.key'
-if not secret.exists(): secret.write_text(secrets.token_hex(32)); secret.chmod(0o600)
+if not os.environ.get('SESSION_SECRET') and not secret.exists(): secret.write_text(secrets.token_hex(32)); secret.chmod(0o600)
 app=Flask(__name__,static_folder='static')
-app.config.update(SECRET_KEY=secret.read_text(),MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1',PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
+app.config.update(SECRET_KEY=os.environ.get('SESSION_SECRET') or secret.read_text(),MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1',PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
 failures={}
 REASONS=['Accidental drop / handling','Staff handling damage','Guest-related damage','Wear and tear','Kitchen / service operation','Missing / unable to locate','Unknown','Other']
 def now(): return datetime.now().isoformat(timespec='seconds')
 def db():
     if 'db' not in g:
-        g.db=sqlite3.connect(DATA/'inventory.db',timeout=20); g.db.row_factory=sqlite3.Row; g.db.execute('PRAGMA foreign_keys=ON')
+        if os.environ.get('DATABASE_URL'):
+            from cloud_database import Database
+            g.db=Database(os.environ['DATABASE_URL'])
+        else:
+            g.db=sqlite3.connect(DATA/'inventory.db',timeout=20); g.db.row_factory=sqlite3.Row; g.db.execute('PRAGMA foreign_keys=ON')
     return g.db
 def rows(sql,args=()): return [dict(r) for r in db().execute(sql,args).fetchall()]
 def one(sql,args=()):
@@ -82,6 +87,10 @@ def headers(r):
     return r
 
 def init():
+    if os.environ.get('DATABASE_URL'):
+        with app.app_context():
+            if not one('SELECT id FROM users LIMIT 1'): raise RuntimeError('Migrate existing data before starting cloud mode')
+        return
     with app.app_context():
         db().executescript((ROOT/'schema.sql').read_text())
         if 'auth_version' not in [r['name'] for r in rows('PRAGMA table_info(users)')]:
@@ -165,6 +174,8 @@ def save_photo(encoded):
         im=ImageOps.exif_transpose(im).convert('RGB'); im.thumbnail((1600,1600))
         name=uuid.uuid4().hex+'.webp'; im.save(DATA/'photos'/name,'WEBP',quality=72)
         im.thumbnail((320,320)); im.save(DATA/'photos'/('thumb-'+name),'WEBP',quality=72)
+        cloud_files.upload(DATA,'photos/'+name)
+        cloud_files.upload(DATA,'photos/thumb-'+name)
         return name
     except (ValueError,UnidentifiedImageError,OSError): fail('This image could not be read. Choose another photo.')
 
@@ -294,11 +305,11 @@ def photo(name):
     original=name.removeprefix('thumb-')
     queued=rows('SELECT actor,section_id,payload FROM submissions')
     if any(json.loads(q['payload']).get('photo')==original and access.allows(q['section_id']) and (q['actor']==g.user['id'] or review_admin()) for q in queued):
-        return send_file(DATA/'photos'/name,mimetype='image/webp')
+        return send_file(cloud_files.local(DATA,'photos/'+name),mimetype='image/webp')
     references=rows('SELECT section_id FROM items WHERE photo=?',(original,))
     references+=rows('SELECT section_id FROM movements WHERE photo=?'+(' AND actor=?' if g.user['access_role']=='STAFF' else ''),(original,g.user['id']) if g.user['access_role']=='STAFF' else (original,))
     if not any(access.allows(r['section_id']) for r in references) or not any(access.can(p) for p in ('inventory','counts','review_counts','breakage','reports')): fail('Photo unavailable.',403)
-    return send_file(DATA/'photos'/name,mimetype='image/webp')
+    return send_file(cloud_files.local(DATA,'photos/'+name),mimetype='image/webp')
 @app.post('/api/movements')
 @need()
 def movement():
@@ -448,7 +459,7 @@ def count_action(sid,m):
                 data=rr if kind=='inventory' else event_rows(m,sid=sid,types=('BREAKAGE',))
                 for fmt in ('xlsx','pdf'):
                     blob=make_export(data,kind,fmt,f'{section(sid)["name"]} · {m} · revision {version}',DATA)
-                    path=f'{sid}_{m}_v{version}_{kind}.{fmt}'; (DATA/'reports'/path).write_bytes(blob)
+                    path=f'{sid}_{m}_v{version}_{kind}.{fmt}'; (DATA/'reports'/path).write_bytes(blob); cloud_files.upload(DATA,'reports/'+path)
                     db().execute('INSERT INTO archives(snapshot_id,kind,format,path,sha256) VALUES(?,?,?,?,?)',(snap,kind,fmt,path,hashlib.sha256(blob).hexdigest()))
         if action=='submit': db().execute('UPDATE counts SET submitted_by=?,submitted_at=? WHERE id=?',(g.user['id'],now(),c['id']))
         else: db().execute('UPDATE counts SET reviewed_by=? WHERE id=?',(g.user['id'],c['id']))
@@ -541,7 +552,7 @@ def archive_file(aid):
     a=one('SELECT a.*,c.section_id FROM archives a JOIN snapshots s ON s.id=a.snapshot_id JOIN counts c ON c.id=s.count_id WHERE a.id=?',(aid,))
     if not a: fail('Archive not found.',404)
     check_scope(a['section_id'])
-    return send_file(DATA/'reports'/a['path'],as_attachment=True)
+    return send_file(cloud_files.local(DATA,'reports/'+a['path']),as_attachment=True,download_name=a['path'])
 @app.get('/api/notifications')
 @need()
 def notifications():
@@ -635,6 +646,13 @@ def backup():
     import zipfile,tempfile
     audit('BACKUP_EXPORTED',{}); db().commit()
     buffer=io.BytesIO()
+    if os.environ.get('DATABASE_URL'):
+        with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as z:
+            z.writestr('inventory-postgres.json',json.dumps(db().dump()))
+            for folder in ('photos','reports'):
+                for relative in cloud_files.objects(folder): z.write(cloud_files.local(DATA,relative),relative)
+        buffer.seek(0)
+        return send_file(buffer,as_attachment=True,download_name=f'inventory-cloud-backup-{date.today()}.zip')
     with tempfile.TemporaryDirectory() as tmp:
         dest=sqlite3.connect(Path(tmp)/'inventory.db'); db().backup(dest); dest.close()
         with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as z:
