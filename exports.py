@@ -11,6 +11,9 @@ def make_export(data,kind,fmt,title,root):
     elif kind=='yearly':
         headers=['Month','Closed item counts','Purchase INR','Breakage quantity','Breakage INR','Variance']
         values=[[r['month'],r['items'],r['purchase_value']/100,r['breakage_qty'],r['breakage_value']/100,r['difference']] for r in data]; piccol=None
+    elif kind=='assets':
+        headers=['SI.NO','Asset Name','Location','Picture','Quantity','Rate INR','Total INR','Property','Notes']
+        values=[[n,r['name'],r.get('location',''),'',r['qty'],None if r.get('rate') is None else r['rate']/100,None if r.get('rate') is None else (r['qty']*(r['rate'] or 0))/100,r.get('property',''),r.get('notes','')] for n,r in enumerate(data,1)]; piccol=4
     else:
         headers=['SI.NO','Item','Section','Quantity','Reason','Photo','Rate INR','Value INR','Staff','Date','Note','Username','User ID']
         values=[[n,r['name'],r.get('section',''),abs(r['qty']),r.get('reason',''),'',None if r['rate'] is None else r['rate']/100,None if r['rate'] is None else abs(r['qty'])*r['rate']/100,r.get('staff',''),r['date'],r.get('note',''),r.get('username',''),r.get('submitter_id',r.get('actor',''))] for n,r in enumerate(data,1)]; piccol=6
@@ -50,8 +53,8 @@ def make_export(data,kind,fmt,title,root):
         from reportlab.lib.pagesizes import A4,landscape
         styles=getSampleStyleSheet(); styles['Normal'].fontSize=8; styles['Normal'].leading=10; doc=SimpleDocTemplate(out,pagesize=landscape(A4),rightMargin=24,leftMargin=24,topMargin=24,bottomMargin=24)
         # Keep operational columns readable. Excel carries the full extended inventory layout.
-        indices=[0,1,7,2,3,4,5,10,6,11,15] if kind=='inventory' else list(range(6)) if kind=='yearly' else [0,1,2,3,4,5,7,11,12,9,10]
-        pdf_labels={0:'No.',1:'Item',2:'Photo',3:'Previous',4:'Added',5:'Breakage',6:'Counted',10:'Expected',11:'Difference',15:'Status'} if kind=='inventory' else {}
+        indices=[0,1,7,2,3,4,5,10,6,11,15] if kind=='inventory' else list(range(6)) if kind=='yearly' else list(range(9)) if kind=='assets' else [0,1,2,3,4,5,7,11,12,9,10]
+        pdf_labels={0:'No.',1:'Item',2:'Photo',3:'Previous',4:'Added',5:'Breakage',6:'Counted',10:'Expected',11:'Difference',15:'Status'} if kind=='inventory' else {0:'No.',1:'Asset Name',2:'Location',3:'Photo',4:'Qty',5:'Rate INR',6:'Total INR',7:'Property',8:'Notes'} if kind=='assets' else {}
         table=[[Paragraph(escape(pdf_labels.get(i,headers[i])),styles['Normal']) for i in indices]]
         for n,row in enumerate(values):
             cells=[]
@@ -59,7 +62,7 @@ def make_export(data,kind,fmt,title,root):
                 if piccol and i==piccol-1 and data[n].get('photo') and (root/'photos'/('thumb-'+data[n]['photo'])).exists(): cells.append(Image(str(root/'photos'/('thumb-'+data[n]['photo'])),width=38,height=38,kind='proportional'))
                 else: cells.append(Paragraph(escape(str(row[i] if row[i] is not None else 'Not recorded')),styles['Normal']))
             table.append(cells)
-        widths=([26,150,86,50,55,50,55,55,50,60,100] if kind=='inventory' else [30,105,62,35,100,42,55,75,35,60,90] if kind!='yearly' else None)
+        widths=([26,150,86,50,55,50,55,55,50,60,100] if kind=='inventory' else [26,130,85,45,40,55,65,85,185] if kind=='assets' else [30,105,62,35,100,42,55,75,35,60,90] if kind!='yearly' else None)
         t=Table(table,colWidths=widths,repeatRows=1,hAlign='LEFT'); t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#dcece4')),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f6f8f6')]),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('BOTTOMPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),8),('LINEBELOW',(0,0),(-1,0),1,colors.HexColor('#173f35'))]))
         story=[Paragraph(escape('Travellers Cavern + Travelicious'),styles['Title']),Paragraph(escape(title),styles['Heading2']),Spacer(1,14),t,Spacer(1,22),Paragraph('Reviewed by: ____________________    Approved by: ____________________',styles['Normal'])]
         def footer(canvas,doc):

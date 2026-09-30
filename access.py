@@ -9,6 +9,7 @@ PERMISSIONS={
  'counts':'Enter and submit physical counts', 'view_totals':'View stock, rates and financial totals',
  'review_counts':'Review, close and reopen months', 'adjustments':'Adjust stock / backdate transactions',
  'reports':'View and download reports / archived files', 'users':'Manage staff accounts and access',
+ 'assets':'View and manage property assets',
 }
 DEFAULT_STAFF=['add_items','purchases','breakage','counts']
 STAFF_ACTIONS=set(DEFAULT_STAFF)
@@ -49,7 +50,8 @@ def policy(endpoint,method,data):
            'events':('inventory','breakage','purchases','reports'),'reports':('reports',),'export':('reports',),
            'archives':('reports',),'archive_file':('reports',),'users':('users',),'user_write':('users',),
            'section_write':('settings',),'audit_list':('audit',),'backup':('backups',),
-           'preview':('import',),'commit':('import',)}
+           'preview':('import',),'commit':('import',),
+           'assets':('assets',),'create_asset':('assets',),'edit_asset':('assets',),'delete_asset':('assets',),'bulk_delete_assets':('assets',),'export_assets':('assets',)}
     if endpoint=='movement': return ({'PURCHASE':'purchases','BREAKAGE':'breakage','DAMAGE':'breakage','ADJUSTMENT':'adjustments'}.get(data.get('type'),'invalid'),)
     if endpoint=='count_action': return ('review_counts',) if data.get('action') in ('close','reopen','return','share') else ('counts',)
     return fixed.get(endpoint)

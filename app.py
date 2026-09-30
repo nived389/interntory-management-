@@ -190,6 +190,9 @@ def init():
                 db().execute('SELECT path FROM stored_files LIMIT 1')
                 ready=one("SELECT value FROM settings WHERE key='turso_migration_ready'")
                 if ready and ready['value']!='true': raise RuntimeError('Turso migration is not complete')
+            db().execute('''CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY,property_id INTEGER NOT NULL REFERENCES properties(id),name TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',qty INTEGER NOT NULL DEFAULT 1,rate INTEGER,photo TEXT,notes TEXT DEFAULT '',created TEXT NOT NULL,updated TEXT NOT NULL)''')
+            db().execute('CREATE INDEX IF NOT EXISTS idx_assets_prop ON assets(property_id)')
+            db().commit()
         return
     with app.app_context():
         db().executescript((ROOT/'schema.sql').read_text())
@@ -524,12 +527,125 @@ def bulk_delete_items():
     audit('ITEMS_BULK_DELETED',{'item_ids':item_ids,'count':deleted_count})
     db().commit(); return jsonify(ok=True,deleted=deleted_count)
 
+@app.get('/api/assets')
+@need()
+def assets():
+    p = request.args.get('property')
+    q = (request.args.get('search') or '').strip().lower()
+    sql = 'SELECT a.*, p.name AS property FROM assets a JOIN properties p ON p.id=a.property_id WHERE 1=1'
+    args = []
+    if p:
+        sql += ' AND a.property_id=?'
+        args.append(number(p, 1))
+    if q:
+        sql += ' AND (LOWER(a.name) LIKE ? OR LOWER(a.location) LIKE ? OR LOWER(a.notes) LIKE ?)'
+        pat = f'%{q}%'
+        args.extend([pat, pat, pat])
+    sql += ' ORDER BY a.location ASC, a.name ASC'
+    return jsonify(rows(sql, tuple(args)))
+
+@app.post('/api/assets')
+@need()
+def create_asset():
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name: fail('Asset name is required.')
+    pid = number(d.get('property_id'), 1)
+    if not one('SELECT id FROM properties WHERE id=?', (pid,)): fail('Select a valid property.')
+    location = (d.get('location') or '').strip()
+    qty = number(d.get('qty', 1), 0)
+    rate = money(d.get('rate')) if d.get('rate') not in (None, '') else None
+    photo = save_photo(d.get('photo')) if d.get('photo') else None
+    notes = (d.get('notes') or '').strip()
+    ts = now()
+    db().execute('BEGIN IMMEDIATE')
+    cur = db().execute('INSERT INTO assets(property_id,name,location,qty,rate,photo,notes,created,updated) VALUES(?,?,?,?,?,?,?,?,?)', (pid, name, location, qty, rate, photo, notes, ts, ts))
+    audit('ASSET_CREATED', {'id': cur.lastrowid, 'name': name, 'property_id': pid, 'qty': qty})
+    db().commit()
+    return jsonify(ok=True, id=cur.lastrowid)
+
+@app.patch('/api/assets/<int:aid>')
+@need()
+def edit_asset(aid):
+    d = request.json or {}
+    db().execute('BEGIN IMMEDIATE')
+    old = one('SELECT * FROM assets WHERE id=?', (aid,))
+    if not old: fail('Asset not found.', 404)
+    name = (d.get('name') or old['name']).strip()
+    if not name: fail('Asset name is required.')
+    pid = number(d.get('property_id', old['property_id']), 1)
+    if not one('SELECT id FROM properties WHERE id=?', (pid,)): fail('Select a valid property.')
+    location = (d.get('location') if 'location' in d else old['location']).strip()
+    qty = number(d.get('qty', old['qty']), 0)
+    rate = money(d['rate']) if 'rate' in d and d['rate'] not in (None, '') else (None if 'rate' in d and d['rate'] in (None, '') else old['rate'])
+    photo = save_photo(d['photo']) if d.get('photo') else old['photo']
+    notes = (d.get('notes') if 'notes' in d else old['notes']).strip()
+    ts = now()
+    db().execute('UPDATE assets SET property_id=?,name=?,location=?,qty=?,rate=?,photo=?,notes=?,updated=? WHERE id=?', (pid, name, location, qty, rate, photo, notes, ts, aid))
+    audit('ASSET_UPDATED', {'id': aid, 'name': name, 'property_id': pid})
+    db().commit()
+    return jsonify(ok=True)
+
+@app.delete('/api/assets/<int:aid>')
+@need()
+def delete_asset(aid):
+    db().execute('BEGIN IMMEDIATE')
+    old = one('SELECT * FROM assets WHERE id=?', (aid,))
+    if not old: fail('Asset not found.', 404)
+    db().execute('DELETE FROM assets WHERE id=?', (aid,))
+    audit('ASSET_DELETED', {'id': aid, 'name': old['name']})
+    db().commit()
+    return jsonify(ok=True)
+
+@app.post('/api/assets/bulk-delete')
+@need()
+def bulk_delete_assets():
+    d = request.json or {}
+    asset_ids = [number(x, 1) for x in d.get('asset_ids', [])]
+    if not asset_ids: fail('Select at least one asset to delete.')
+    db().execute('BEGIN IMMEDIATE')
+    deleted = 0
+    for aid in asset_ids:
+        old = one('SELECT id,name FROM assets WHERE id=?', (aid,))
+        if old:
+            db().execute('DELETE FROM assets WHERE id=?', (aid,))
+            deleted += 1
+    audit('ASSETS_BULK_DELETED', {'asset_ids': asset_ids, 'count': deleted})
+    db().commit()
+    return jsonify(ok=True, deleted=deleted)
+
+@app.get('/api/assets/export')
+@need()
+def export_assets():
+    from exports import make_export
+    fmt = request.args.get('format', 'xlsx')
+    if fmt not in ('xlsx', 'pdf'): fail('Invalid export format.')
+    p = request.args.get('property')
+    sql = 'SELECT a.*, p.name AS property FROM assets a JOIN properties p ON p.id=a.property_id'
+    args = []
+    prop_obj = None
+    if p:
+        pid = number(p, 1)
+        prop_obj = one('SELECT name FROM properties WHERE id=?', (pid,))
+        sql += ' WHERE a.property_id=?'
+        args.append(pid)
+    sql += ' ORDER BY p.name, a.location, a.name'
+    data = rows(sql, tuple(args))
+    prop_name = prop_obj['name'] if prop_obj else 'All Properties'
+    title = f"Property Assets | {prop_name}"
+    result = make_export(data, 'assets', fmt, title, DATA)
+    audit('ASSETS_EXPORTED', dict(request.args))
+    db().commit()
+    filename_prop = prop_name.lower().replace(' ', '_')
+    return send_file(io.BytesIO(result), as_attachment=True, download_name=f'assets_{filename_prop}_{date.today().isoformat()}.{fmt}')
 
 @app.get('/photo/<name>')
 @need()
 def photo(name):
     if not re.fullmatch(r'(thumb-)?[a-f0-9]{32}\.webp',name): fail('Photo unavailable.',404)
     original=name.removeprefix('thumb-')
+    if access.can('assets') and one('SELECT 1 FROM assets WHERE photo=?',(original,)):
+        return send_file(cloud_files.local(DATA,'photos/'+name),mimetype='image/webp')
     queued=rows('SELECT actor,section_id,payload FROM submissions')
     if any(json.loads(q['payload']).get('photo')==original and access.allows(q['section_id']) and (q['actor']==g.user['id'] or review_admin()) for q in queued):
         return send_file(cloud_files.local(DATA,'photos/'+name),mimetype='image/webp')

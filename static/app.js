@@ -1,9 +1,9 @@
 'use strict';
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const icons={home:'M3 10l9-7 9 7v10H3z M9 20v-7h6v7',box:'M3 7l9-4 9 4v13H3z M3 7l9 5 9-5 M12 12v8',count:'M8 4H5v17h14V4h-3 M9 2h6v5H9z M8 12h8 M8 16h5',break:'M13 2l-3 7 5 3-5 10 M5 4H2v17h7 M16 4h6v17h-9',report:'M4 3h12l4 4v14H4z M8 16v-3 M12 16V9 M16 16v-5',users:'M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-3a4 4 0 0 0-3-4 M17 2a4 4 0 0 1 0 8',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2',audit:'M4 4h16v16H4z M8 8h8 M8 12h8 M8 16h4',arrow:'M5 12h14 M13 6l6 6-6 6',plus:'M12 5v14 M5 12h14',photo:'M3 6h5l2-3h4l2 3h5v15H3z M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8',logout:'M9 3H3v18h6 M9 12h12 M17 8l4 4-4 4'};
+const icons={home:'M3 10l9-7 9 7v10H3z M9 20v-7h6v7',box:'M3 7l9-4 9 4v13H3z M3 7l9 5 9-5 M12 12v8',count:'M8 4H5v17h14V4h-3 M9 2h6v5H9z M8 12h8 M8 16h5',break:'M13 2l-3 7 5 3-5 10 M5 4H2v17h7 M16 4h6v17h-9',report:'M4 3h12l4 4v14H4z M8 16v-3 M12 16V9 M16 16v-5',users:'M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-3a4 4 0 0 0-3-4 M17 2a4 4 0 0 1 0 8',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2',audit:'M4 4h16v16H4z M8 8h8 M8 12h8 M8 16h4',arrow:'M5 12h14 M13 6l6 6-6 6',plus:'M12 5v14 M5 12h14',photo:'M3 6h5l2-3h4l2 3h5v15H3z M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8',logout:'M9 3H3v18h6 M9 12h12 M17 8l4 4-4 4',asset:'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16'};
 const icon=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[n]||icons.box}"/></svg>`;
-const state={user:null,csrf:'',page:'dashboard',property:'1',month:'',section:'',items:[],context:null,reportKind:'inventory',countSection:null,search:'',auditOffset:0};
+const state={user:null,csrf:'',page:'dashboard',property:'1',assetProperty:'1',assetSearch:'',selectedAssets:new Set(),month:'',section:'',items:[],context:null,reportKind:'inventory',countSection:null,search:'',auditOffset:0};
 let renderVersion=0;
 const can=p=>!!state.user?.permissions?.includes(p);
 const master=()=>can('view_totals');
@@ -34,11 +34,11 @@ function auth(info){
  $('#show-password').onchange=e=>$('#f-password').type=e.target.checked?'text':'password';
  $('#password-login').onsubmit=async e=>{e.preventDefault();const b=$('[type=submit]',e.target);b.disabled=true;try{await api('/login','POST',Object.fromEntries(new FormData(e.target)));history.replaceState(null,'','/');await boot()}catch(err){$('.error',e.target).textContent=err.message;$('.error',e.target).classList.add('visible');b.disabled=false}};
 }
-const pageNames={addstock:'Add items / purchases',corrections:'Corrections',reviews:'Reports & approvals',dashboard:'Overview',inventory:'Inventory',counts:'Monthly count',breakage:'Breakage',reports:'Reports',users:'Team members',settings:'Settings',audit:'Audit trail'};
-function shell(){if(staffMode())return staffShell();const nav=[['dashboard','home','Overview'],...(state.user.is_owner?[['reviews','audit','Reports & approvals']]:[]),...(can('inventory')?[['inventory','box','Inventory']]:[]),...((can('counts')||can('review_counts'))?[['counts','count','Monthly count']]:[]),...(can('breakage')?[['breakage','break','Breakage']]:[]),...(can('reports')?[['reports','report','Reports']]:[]),...(can('users')?[['users','users','Team & access']]:[]),['settings','settings',fullAdmin()?'Settings':'Account'],...(can('audit')?[['audit','audit','Audit trail']]:[])];$('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><img src="/static/travelicious-logo.png" alt="Travelicious logo"><div><strong>Travelicious</strong><small>Inventory Management</small></div></div><div class="navlabel">WORKSPACE</div><nav class="nav" aria-label="Main navigation">${nav.map(([p,i,l])=>`<button data-page="${p}" class="${p===state.page?'active':''}">${icon(i)}<span>${l}</span></button>`).join('')}</nav><div class="sidebar-foot"><div class="workspace-note"><strong>Every item, accounted for.</strong>One workspace. Two properties.<br>A clearer picture of your operations.</div><div class="profile"><span class="avatar">${esc(state.user.name[0].toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${state.user.role==='MASTER'?'Master':state.user.role==='ADMIN'?(fullAdmin()?'Admin · full access':'Admin · restricted'):'Staff member'}</small></div><button class="ghost small" id="logout" aria-label="Log out">Log out</button></div></div></aside><div class="main"><header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> <strong>${pageNames[state.page]}</strong></div><div class="topfilters"><span class="connection ${navigator.onLine?'':'offline'}">${navigator.onLine?'Workspace connected':'Offline · drafts saved'}</span><select id="property" aria-label="Property">${master()?'<option value="">All properties</option>':''}${state.context.properties.map(p=>`<option value="${p.id}" ${String(p.id)===state.property?'selected':''}>${p.name}</option>`).join('')}</select><span id="workspace-month" class="badge ${state.month===state.context.today.slice(0,7)?'green':'amber'}" aria-label="Reporting month">${monthLabel()}${state.month===state.context.today.slice(0,7)?' · automatic':''}</span><div class="account-controls">${state.user.role==='MASTER'?`<button type="button" id="notifications-button" class="notification-button" aria-label="Notifications">${icon('audit')}<span class="notification-label">Notifications</span><span id="notification-count" class="notification-count" hidden>0</span></button>`:''}<button id="profile-button" class="profile-button" aria-haspopup="dialog" aria-label="Open profile"><span class="avatar">${esc(state.user.name[0].toUpperCase())}</span><span class="profile-label">Profile</span><span aria-hidden="true">⌄</span></button></div></div></header><main id="main"></main></div></div>`;$$('[data-page]').forEach(b=>b.onclick=()=>{state.page=b.dataset.page;state.countSection=null;if(!['dashboard','reports','breakage'].includes(state.page))state.month=state.context.today.slice(0,7);render()});$('#property').value=state.property;$('#property').onchange=e=>{state.property=e.target.value;state.section='';state.countSection=null;render()};$('#logout').onclick=logout;$('#profile-button').onclick=profileMenu;if($('#notifications-button'))$('#notifications-button').onclick=notificationInbox;refreshNotifications();}
+const pageNames={addstock:'Add items / purchases',corrections:'Corrections',reviews:'Reports & approvals',dashboard:'Overview',inventory:'Inventory',assets:'Property assets',counts:'Monthly count',breakage:'Breakage',reports:'Reports',users:'Team members',settings:'Settings',audit:'Audit trail'};
+function shell(){if(staffMode())return staffShell();const nav=[['dashboard','home','Overview'],...(state.user.is_owner?[['reviews','audit','Reports & approvals']]:[]),...(can('inventory')?[['inventory','box','Inventory']]:[]),...(can('assets')?[['assets','asset','Assets']]:[]),...((can('counts')||can('review_counts'))?[['counts','count','Monthly count']]:[]),...(can('breakage')?[['breakage','break','Breakage']]:[]),...(can('reports')?[['reports','report','Reports']]:[]),...(can('users')?[['users','users','Team & access']]:[]),['settings','settings',fullAdmin()?'Settings':'Account'],...(can('audit')?[['audit','audit','Audit trail']]:[])];$('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand"><img src="/static/travelicious-logo.png" alt="Travelicious logo"><div><strong>Travelicious</strong><small>Inventory Management</small></div></div><div class="navlabel">WORKSPACE</div><nav class="nav" aria-label="Main navigation">${nav.map(([p,i,l])=>`<button data-page="${p}" class="${p===state.page?'active':''}">${icon(i)}<span>${l}</span></button>`).join('')}</nav><div class="sidebar-foot"><div class="workspace-note"><strong>Every item, accounted for.</strong>One workspace. Two properties.<br>A clearer picture of your operations.</div><div class="profile"><span class="avatar">${esc(state.user.name[0].toUpperCase())}</span><div><strong>${esc(state.user.name)}</strong><small>${state.user.role==='MASTER'?'Master':state.user.role==='ADMIN'?(fullAdmin()?'Admin · full access':'Admin · restricted'):'Staff member'}</small></div><button class="ghost small" id="logout" aria-label="Log out">Log out</button></div></div></aside><div class="main"><header class="topbar"><div class="breadcrumbs">Workspace <span>/</span> <strong>${pageNames[state.page]}</strong></div><div class="topfilters"><span class="connection ${navigator.onLine?'':'offline'}">${navigator.onLine?'Workspace connected':'Offline · drafts saved'}</span><select id="property" aria-label="Property">${master()?'<option value="">All properties</option>':''}${state.context.properties.map(p=>`<option value="${p.id}" ${String(p.id)===state.property?'selected':''}>${p.name}</option>`).join('')}</select><span id="workspace-month" class="badge ${state.month===state.context.today.slice(0,7)?'green':'amber'}" aria-label="Reporting month">${monthLabel()}${state.month===state.context.today.slice(0,7)?' · automatic':''}</span><div class="account-controls">${state.user.role==='MASTER'?`<button type="button" id="notifications-button" class="notification-button" aria-label="Notifications">${icon('audit')}<span class="notification-label">Notifications</span><span id="notification-count" class="notification-count" hidden>0</span></button>`:''}<button id="profile-button" class="profile-button" aria-haspopup="dialog" aria-label="Open profile"><span class="avatar">${esc(state.user.name[0].toUpperCase())}</span><span class="profile-label">Profile</span><span aria-hidden="true">⌄</span></button></div></div></header><main id="main"></main></div></div>`;$$('[data-page]').forEach(b=>b.onclick=()=>{state.page=b.dataset.page;state.countSection=null;if(!['dashboard','reports','breakage'].includes(state.page))state.month=state.context.today.slice(0,7);render()});$('#property').value=state.property;$('#property').onchange=e=>{state.property=e.target.value;state.section='';state.countSection=null;render()};$('#logout').onclick=logout;$('#profile-button').onclick=profileMenu;if($('#notifications-button'))$('#notifications-button').onclick=notificationInbox;refreshNotifications();}
 async function logout(){if(Object.keys(drafts()).length&&!confirm('There are unsynced count drafts on this device. Sign out and keep them for your next login?'))return;await api('/logout','POST',{});state.user=null;boot()}
 function pageHead(title,subtitle,actions=''){return `<div class="page-head"><div><div class="eyebrow">${esc(prop())} / ${monthLabel()}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="actions">${actions}</div></div>`}
-async function render(){if(staffMode()&&!['dashboard','counts','addstock','corrections','settings'].includes(state.page))state.page='dashboard';if(!state.user.is_owner&&['reviews','reports'].includes(state.page))state.page='dashboard';const version=++renderVersion;shell();const mainEl=$('#main');if(mainEl)mainEl.innerHTML=`<div class="loading"><div class="spinner"></div>Loading ${pageNames[state.page]||'workspace'}…</div>`;try{const html=await ({corrections:reviewsPage,addstock:staffAddPage,reviews:reviewsPage,dashboard:dashboard,inventory:inventory,counts:countsPage,breakage:breakagePage,reports:reportsPage,users:usersPage,settings:settingsPage,audit:auditPage}[state.page])();if(version!==renderVersion)return;$('#main').innerHTML=html;bindPage();refreshReviewBadge();}catch(e){if(version===renderVersion)$('#main').innerHTML=`<div class="empty">${esc(e.message)}<br><button id="page-retry">Try again</button></div>`;if($('#page-retry'))$('#page-retry').onclick=render}}
+async function render(){if(staffMode()&&!['dashboard','counts','addstock','corrections','settings'].includes(state.page))state.page='dashboard';if(!state.user.is_owner&&['reviews','reports'].includes(state.page))state.page='dashboard';if(!can('assets')&&state.page==='assets')state.page='dashboard';const version=++renderVersion;shell();const mainEl=$('#main');if(mainEl)mainEl.innerHTML=`<div class="loading"><div class="spinner"></div>Loading ${pageNames[state.page]||'workspace'}…</div>`;try{const html=await ({corrections:reviewsPage,addstock:staffAddPage,reviews:reviewsPage,dashboard:dashboard,inventory:inventory,assets:assetsPage,counts:countsPage,breakage:breakagePage,reports:reportsPage,users:usersPage,settings:settingsPage,audit:auditPage}[state.page])();if(version!==renderVersion)return;$('#main').innerHTML=html;bindPage();refreshReviewBadge();}catch(e){if(version===renderVersion)$('#main').innerHTML=`<div class="empty">${esc(e.message)}<br><button id="page-retry">Try again</button></div>`;if($('#page-retry'))$('#page-retry').onclick=render}}
 const empty=(text,i='box')=>`<div class="empty">${icon(i)}<br>${text}</div>`;
 async function dashboard(){if(staffMode())return staffDashboard();const [items,counts,events]=await Promise.all([can('inventory')?(state.items?.length&&(!state.property||String(state.items[0]?.property_id)===state.property)?Promise.resolve(state.items):api('/items?property='+state.property)):Promise.resolve([]),(can('counts')||can('review_counts'))?api('/counts?month='+state.month):Promise.resolve([]),(can('inventory')||can('purchases')||can('breakage')||can('reports'))?api('/events?property='+state.property+'&month='+state.month):Promise.resolve([])]);state.items=items;const cs=counts.filter(c=>!state.property||String(c.property_id)===state.property),pending=cs.filter(c=>c.total&&c.status!=='CLOSED');const br=events.filter(e=>['BREAKAGE','DAMAGE'].includes(e.type));const purchase=events.filter(e=>['OPENING','PURCHASE'].includes(e.type));const purchaseVal=purchase.reduce((a,r)=>a+Math.abs(r.qty)*(r.rate||0),0);const breakageVal=br.reduce((a,r)=>a+Math.abs(r.qty)*(r.rate||0),0);const breakageQty=br.reduce((a,r)=>a+Math.abs(r.qty),0);const isCurrentMonth=state.month===state.context.today.slice(0,7);const monthBar=master()?`<div class="dashboard-month-bar"><div class="month-indicator"><span class="eyebrow" style="margin:0">MONTHLY METRICS</span><strong class="month-title">${monthLabel()}</strong>${isCurrentMonth?'<span class="badge green">Current month (automatic)</span>':'<span class="badge amber">Historical month</span>'}</div><div class="month-controls"><label for="dashboard-month-select" class="month-select-label">Change month:</label><div class="month-nav-group"><button type="button" id="dashboard-prev-month" class="ghost small" title="Previous month">‹ Previous</button><input type="month" id="dashboard-month-select" value="${state.month}" max="${state.context.today.slice(0,7)}" aria-label="Reporting month"><button type="button" id="dashboard-next-month" class="ghost small" title="Next month" ${state.month>=state.context.today.slice(0,7)?'disabled':''}>Next ›</button>${!isCurrentMonth?'<button type="button" id="dashboard-today-btn" class="small ghost">↺ Today’s month</button>':''}</div></div></div>`:'';return pageHead(master()?'Inventory overview':'Your daily workspace',master()?'A little clarity for everything behind the scenes.':'Choose an action to keep your property running smoothly.',`<button data-additem class="primary">+ Add item</button>`)+`<section class="welcome"><div><div class="eyebrow">A WELL-KEPT WORKSPACE</div><h2>${master()?'Small details. Smooth operations.':'Let’s get everything accounted for.'}</h2><p>${master()?`Your ${monthLabel()} inventory is ready. Review section counts, record new purchases, and keep your team on the same page.`:'Count what you see, record stock as it arrives, and capture any damage with a photo.'}</p></div><button class="lime" data-nav="counts">${master()?'Review monthly counts':'Start a monthly count'} &nbsp; →</button></section>`+monthBar+(master()?`<div class="stats">${stat('Active items',items.length,'Across '+cs.length+' sections','box','inventory')}${stat('Counts pending',pending.length,pending.length?`${pending.length} section${pending.length===1?'':'s'} awaiting ${monthLabel()} close`:`All sections closed for ${monthLabel()}`,'count','counts')}${stat('Purchase value',rupees(purchaseVal),`${purchase.length} stock addition${purchase.length===1?'':'s'} in ${monthLabel()}`,'report','reports','purchases')}${stat('Breakage value',rupees(breakageVal),`${breakageQty} item${breakageQty===1?'':'s'} recorded in ${monthLabel()}`,'break','breakage')}</div>`:`<div class="actions" style="margin-bottom:24px"><button class="primary" data-move="PURCHASE">+ Add stock / purchase</button><button data-move="BREAKAGE">Report breakage</button><button data-nav="counts">Monthly count</button></div>`)+`<div class="dashboard-grid"><div><section class="panel"><div class="panel-head"><div><h2>Monthly inventory</h2><p>Section-by-section progress · ${monthLabel()}</p></div><button class="ghost small" data-nav="counts">View all →</button></div>${cs.map(c=>`<div class="section-row"><span class="section-icon">${icon('box')}</span><div class="section-title"><strong>${esc(c.name)}</strong><small>${c.completed} of ${c.total} items counted</small></div><div>${statusBadge(c.total?c.status:'EMPTY')}<div class="progress"><span style="width:${c.total?c.completed/c.total*100:0}%"></span></div></div><button class="ghost small" data-count="${c.id}" aria-label="Open ${esc(c.name)} count">→</button></div>`).join('')}</section>${master()&&items.some(i=>!i.photo)?`<div class="notice"><strong>Your catalogue is ready for its finishing touches.</strong><br>${items.filter(i=>!i.photo).length} items need reference photos. Add specifications, opening stock and rates before your first count. <button class="ghost small" data-nav="inventory">Review items →</button></div>`:''}</div><div><section class="panel"><div class="panel-head"><div><h2>Quick actions</h2><p>The everyday essentials, one click away.</p></div></div><div class="panel-body"><div class="nav"><button data-move="PURCHASE">${icon('plus')} Add stock / purchase <span class="spacer"></span>→</button><button data-move="BREAKAGE">${icon('break')} Report breakage <span class="spacer"></span>→</button><button data-nav="${master()?'reports':'counts'}">${icon('report')} ${master()?'Download a report':'Continue counting'} <span class="spacer"></span>→</button></div></div></section><section class="panel"><div class="panel-head"><div><h2>Recent activity</h2><p>${master()?'Stock movements · '+monthLabel():'Your recent submissions'}</p></div><span class="badge">${events.length} records</span></div>${events.length?events.slice(0,5).map(e=>`<div class="activity"><span class="dot"></span><div><strong>${esc(e.name)}</strong><p>${esc(e.type.toLowerCase())} · ${Math.abs(e.qty)} items ${master()?'· '+esc(e.staff):''}</p><small>${esc(e.date)}</small></div></div>`).join(''):empty('No stock movements recorded for '+monthLabel()+'.','audit')}</section></div></div><div class="footer-note">TRAVELLERS CAVERN × TRAVELICIOUS &nbsp; · &nbsp; EVERY ITEM HAS A PLACE.</div>`}
 function stat(label,value,foot,i,nav,reportKind){return `<div class="stat ${nav?'clickable':''}" ${nav?`data-nav="${nav}" ${reportKind?`data-report-kind="${reportKind}"`:''} tabindex="0" role="button" aria-label="View ${label}"`:''}><div class="stat-top">${label}${icon(i)}</div><div class="stat-value">${value}</div><div class="stat-foot">${foot}</div></div>`}
@@ -80,7 +80,204 @@ async function reportsPage(){
  let preview=archive?(archives.length?`<div class="table-wrap"><table><thead><tr><th>Month</th><th>Section</th><th>Report</th><th>Revision</th><th>File</th></tr></thead><tbody>${archives.map(a=>`<tr><td>${esc(a.month)}</td><td>${esc(state.context.sections.find(s=>s.id===a.section_id)?.name)}</td><td>${esc(a.kind)}</td><td>${a.version}</td><td><a href="/api/archives/${a.id}">Download ${a.format.toUpperCase()}</a></td></tr>`).join('')}</tbody></table></div>`:empty('No closed files for this month and these sections.')):state.reportKind==='inventory'?inventoryReport(rr):yearly?`<div class="table-wrap"><table><thead><tr><th>Month</th><th>Closed item counts</th><th>Purchase value</th><th>Breakage quantity</th><th>Breakage value</th><th>Difference</th></tr></thead><tbody>${rr.map(r=>`<tr><td>${r.month}</td><td>${r.items}</td><td>${rupees(r.purchase_value)}</td><td>${r.breakage_qty}</td><td>${rupees(r.breakage_value)}</td><td>${qty(r.difference)}</td></tr>`).join('')}</tbody></table></div>`:rr.length?eventTable(rr):empty('No approved transactions for this month and these sections.');
  return pageHead('Download reports','Choose a period and sections. Preview and downloads use the same selection.')+`<div class="tabs">${[['inventory','Monthly reports'],['yearly','Year-end reports'],['archives','Saved closed reports']].map(([k,l])=>`<button data-report="${k}" class="${k==='inventory'?!yearly&&!archive?'active':'':state.reportKind===k?'active':''}">${l}</button>`).join('')}</div>`+filters+(selected.length?`<section class="panel"><div class="panel-head"><div><h2>${esc({inventory:'Monthly inventory',breakage:'Monthly breakage',purchases:'Monthly purchases',yearly:'Year-end summary',archives:'Saved closed reports'}[state.reportKind])}</h2><p>${yearly?'Closed monthly snapshots only. Months without accepted counts have no closed totals.':archive?'Original files saved when counts were accepted.':'Accepted stock transactions only. Unclosed inventory counts are marked as live previews.'}</p></div>${!archive?`<div class="actions"><button data-export="pdf">Download PDF</button><button class="primary" data-export="xlsx">Download Excel</button></div>`:''}</div>${preview}</section>${!yearly&&!archive?`<section class="panel"><div class="panel-body"><h2>Download monthly report pack</h2><p>Inventory, breakage and purchases for the selected month and sections, together in one ZIP file.</p><div class="actions"><button data-report-pack="pdf">All monthly PDFs</button><button data-report-pack="xlsx">All monthly Excel files</button></div></div></section>`:''}`:empty('Select at least one section to preview or download reports.'));
 }
-function inventoryReport(rr){return rr.length?`<div class="table-wrap"><table><thead><tr><th>Item</th><th>Section</th><th>Previous</th><th>New</th><th>Damage</th><th>Expected</th><th>Actual</th><th>Difference</th><th>Status</th></tr></thead><tbody>${rr.map(r=>`<tr><td class="name">${itemCell(r)}</td><td>${esc(r.section)}</td><td>${qty(r.previous)}</td><td>${qty(r.added)}</td><td>${qty(r.damage)}</td><td>${qty(r.expected)}</td><td>${qty(r.actual)}</td><td class="${r.difference<0?'negative':'positive'}">${qty(r.difference)}</td><td>${statusBadge(r.status)}</td></tr>`).join('')}</tbody></table></div>`:empty('No inventory for these filters.')}
+function assetBulkToolbar(){
+ return `<div id="asset-bulk-toolbar" class="bulk-toolbar" style="display:none"><span class="bulk-count"><strong>0</strong> assets selected</span><div class="actions"><button type="button" class="small ghost" id="asset-bulk-clear-btn">Clear</button><button type="button" class="small danger" id="asset-bulk-delete-btn">Delete selected</button></div></div>`;
+}
+
+async function assetsPage(){
+ if(!can('assets'))return empty('Access restricted.');
+ if(!state.assetProperty)state.assetProperty='1';
+ if(!state.selectedAssets)state.selectedAssets=new Set();
+ const allAssets=await api('/assets');
+ state.allAssets=allAssets;
+ const countTvl=allAssets.filter(a=>String(a.property_id)==='1').length;
+ const countTc=allAssets.filter(a=>String(a.property_id)==='2').length;
+ const activePropName=state.assetProperty==='1'?'Travelicious':'Travellers Cavern';
+ const propAssets=allAssets.filter(a=>String(a.property_id)===state.assetProperty);
+ const totalQty=propAssets.reduce((s,a)=>s+(a.qty||0),0);
+ const totalVal=propAssets.reduce((s,a)=>s+((a.qty||0)*(a.rate||0)),0);
+ const withPhoto=propAssets.filter(a=>a.photo).length;
+
+ return pageHead('Property assets',
+  'Annual physical asset inventory — separate from monthly counts.',
+  `<button class="primary" id="add-asset-btn">+ Add asset</button>`
+ )+
+ `<div class="asset-property-tabs" role="tablist">
+    <button type="button" class="asset-tab ${state.assetProperty==='1'?'active':''}" data-asset-prop="1" role="tab" aria-selected="${state.assetProperty==='1'}">
+      ${icon('asset')}
+      <span>Travelicious</span>
+      <span class="tab-badge">${countTvl} assets</span>
+    </button>
+    <button type="button" class="asset-tab ${state.assetProperty==='2'?'active':''}" data-asset-prop="2" role="tab" aria-selected="${state.assetProperty==='2'}">
+      ${icon('asset')}
+      <span>Travellers Cavern</span>
+      <span class="tab-badge">${countTc} assets</span>
+    </button>
+  </div>
+  <div class="asset-notice">
+    <div class="asset-notice-text">
+      <strong>Annual Physical Asset Register · ${esc(activePropName)}</strong>
+      These property assets are checked and counted once a year. They are completely separate from operational monthly counts and invisible to regular staff.
+    </div>
+    <div class="actions">
+      <button type="button" class="small" id="export-asset-pdf">Export PDF</button>
+      <button type="button" class="small primary" id="export-asset-xlsx">Export Excel</button>
+    </div>
+  </div>
+  <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+    ${stat('Asset items',propAssets.length,activePropName,'asset')}
+    ${stat('Total quantity',totalQty,'Physical units counted','box')}
+    ${stat('Total valuation',rupees(totalVal),'Based on recorded rates','report')}
+    ${stat('Photographed',`${withPhoto} / ${propAssets.length}`,'Documented assets','photo')}
+  </div>
+  <section class="panel">
+    <div class="toolbar">
+      <input type="search" id="asset-search" placeholder="Search asset name, location or notes…" aria-label="Search assets" value="${esc(state.assetSearch||'')}">
+      <span class="badge">${propAssets.length} assets</span>
+    </div>
+    ${assetBulkToolbar()}
+    <div id="asset-table">${assetTable()}</div>
+  </section>`;
+}
+
+function assetTable(){
+ if(!state.selectedAssets)state.selectedAssets=new Set();
+ const q=(state.assetSearch||'').trim().toLowerCase();
+ const items=(state.allAssets||[]).filter(a=>String(a.property_id)===state.assetProperty&&(!q||`${a.name} ${a.location||''} ${a.notes||''}`.toLowerCase().includes(q)));
+ const allSelected=items.length>0&&items.every(a=>state.selectedAssets.has(a.id));
+ return items.length?`<div class="table-wrap"><table><thead><tr><th style="width:40px;text-align:center"><input type="checkbox" id="select-all-assets" ${allSelected?'checked':''} aria-label="Select all assets"></th><th>Asset</th><th>Location</th><th>Count (Qty)</th><th>Unit rate</th><th>Total value</th><th>Notes</th><th style="text-align:right">Actions</th></tr></thead><tbody>${items.map(a=>{
+  const isSel=state.selectedAssets.has(a.id);
+  const total=a.rate!=null?(a.qty*(a.rate||0)):null;
+  return `<tr class="${isSel?'selected':''}" data-asset-row="${a.id}"><td style="text-align:center"><input type="checkbox" data-select-asset="${a.id}" ${isSel?'checked':''} aria-label="Select ${esc(a.name)}"></td><td class="name"><div class="item-cell">${thumb(a)}<div><strong>${esc(a.name)}</strong></div></div></td><td>${a.location?`<span class="badge">${esc(a.location)}</span>`:'<small class="help">Not set</small>'}</td><td><strong>${qty(a.qty)}</strong></td><td>${a.rate!=null?rupees(a.rate):'<small class="help">—</small>'}</td><td>${total!=null?rupees(total):'<small class="help">—</small>'}</td><td>${esc(a.notes||'—')}</td><td style="text-align:right"><div class="actions" style="justify-content:flex-end"><button type="button" class="small ghost" data-edit-asset="${a.id}">Edit</button><button type="button" class="small ghost danger" data-delete-asset="${a.id}">Delete</button></div></td></tr>`;
+ }).join('')}</tbody></table></div><div class="table-footer">Showing ${items.length} assets · ${state.assetProperty==='1'?'Travelicious':'Travellers Cavern'} · Reviewed once a year</div>`:empty('No assets found. Add an asset to start tracking.');
+}
+
+function updateAssetBulkUI(){
+ const n=state.selectedAssets?.size||0;
+ const tb=$('#asset-bulk-toolbar');
+ if(tb){
+  tb.style.display=n?'flex':'none';
+  const label=$('.bulk-count',tb);
+  if(label)label.innerHTML=`<strong>${n}</strong> asset${n===1?'':'s'} selected`;
+ }
+ const q=(state.assetSearch||'').trim().toLowerCase();
+ const visible=(state.allAssets||[]).filter(a=>String(a.property_id)===state.assetProperty&&(!q||`${a.name} ${a.location||''} ${a.notes||''}`.toLowerCase().includes(q)));
+ const allCb=$('#select-all-assets');
+ if(allCb)allCb.checked=visible.length>0&&visible.every(a=>state.selectedAssets?.has(a.id));
+ $$('[data-select-asset]').forEach(cb=>{
+  const isChecked=!!state.selectedAssets?.has(Number(cb.dataset.selectAsset));
+  cb.checked=isChecked;
+  const row=cb.closest('tr');
+  if(row)row.classList.toggle('selected',isChecked);
+ });
+}
+
+function bindAssetRowEvents(){
+ $$('[data-select-asset]').forEach(cb=>{
+  cb.onchange=()=>{
+   const id=Number(cb.dataset.selectAsset);
+   if(cb.checked)state.selectedAssets.add(id);
+   else state.selectedAssets.delete(id);
+   updateAssetBulkUI();
+  };
+ });
+ if($('#select-all-assets'))$('#select-all-assets').onchange=e=>{
+  const q=(state.assetSearch||'').trim().toLowerCase();
+  const visible=(state.allAssets||[]).filter(a=>String(a.property_id)===state.assetProperty&&(!q||`${a.name} ${a.location||''} ${a.notes||''}`.toLowerCase().includes(q)));
+  if(e.target.checked)visible.forEach(a=>state.selectedAssets.add(a.id));
+  else visible.forEach(a=>state.selectedAssets.delete(a.id));
+  updateAssetBulkUI();
+ };
+ $$('[data-edit-asset]').forEach(b=>b.onclick=()=>{
+  const id=Number(b.dataset.editAsset);
+  const a=(state.allAssets||[]).find(x=>x.id===id);
+  if(a)assetForm(a);
+ });
+ $$('[data-delete-asset]').forEach(b=>b.onclick=()=>{
+  const id=Number(b.dataset.deleteAsset);
+  const a=(state.allAssets||[]).find(x=>x.id===id);
+  if(!a)return;
+  showModal('Delete asset?',
+    `<div class="notice" style="border-color:#eac4b8;background:#fff5f2;color:#9b442b"><strong>Delete “${esc(a.name)}”?</strong><br>This asset will be permanently removed from the property asset inventory.</div>`,
+    async()=>{
+      await api('/assets/'+id,'DELETE');
+      state.selectedAssets.delete(id);
+      toast('Asset deleted');
+    }
+  );
+ });
+}
+
+function bindAssets(){
+ $$('[data-asset-prop]').forEach(btn=>btn.onclick=()=>{
+  state.assetProperty=btn.dataset.assetProp;
+  state.selectedAssets.clear();
+  render();
+ });
+ if($('#add-asset-btn'))$('#add-asset-btn').onclick=()=>assetForm();
+ if($('#export-asset-pdf'))$('#export-asset-pdf').onclick=()=>{
+  window.location.href='/api/assets/export?property='+state.assetProperty+'&format=pdf';
+ };
+ if($('#export-asset-xlsx'))$('#export-asset-xlsx').onclick=()=>{
+  window.location.href='/api/assets/export?property='+state.assetProperty+'&format=xlsx';
+ };
+ if($('#asset-search'))$('#asset-search').oninput=e=>{
+  state.assetSearch=e.target.value;
+  $('#asset-table').innerHTML=assetTable();
+  bindAssetRowEvents();
+  updateAssetBulkUI();
+ };
+ if($('#asset-bulk-clear-btn'))$('#asset-bulk-clear-btn').onclick=()=>{
+  state.selectedAssets.clear();
+  updateAssetBulkUI();
+ };
+ if($('#asset-bulk-delete-btn'))$('#asset-bulk-delete-btn').onclick=()=>{
+  const ids=Array.from(state.selectedAssets||[]);
+  if(!ids.length)return toast('Select at least one asset to delete.');
+  showModal(`Delete ${ids.length} selected asset(s)?`,
+    `<div class="notice" style="border-color:#eac4b8;background:#fff5f2;color:#9b442b"><strong>Are you sure?</strong><br>These ${ids.length} asset(s) will be permanently deleted from the asset inventory.</div>`,
+    async()=>{
+      const res=await api('/assets/bulk-delete','POST',{asset_ids:ids});
+      toast(`${res.deleted} asset(s) deleted`);
+      state.selectedAssets.clear();
+    }
+  );
+ };
+ bindAssetRowEvents();
+ updateAssetBulkUI();
+}
+
+function assetForm(a){
+ const props=state.context.properties.map(p=>[p.id,p.name]);
+ let getPhoto;
+ showModal(a?'Edit asset':'Add new asset',
+   `<div class="form-grid">
+     ${uploadField(false)}
+     ${field('Asset name *','name','text',a?.name||'',true)}
+     ${selectField('Property *','property_id',props,a?.property_id||state.assetProperty)}
+     ${field('Asset location','location','text',a?.location||'',false,'placeholder="e.g. Room 101, Lobby, Kitchen, Lawn"')}
+     ${field('Asset count (Quantity) *','qty','number',a?.qty!=null?a.qty:'1',true,'min="0" step="1"')}
+     ${field('Asset rate (Unit rate INR)','rate','number',a?.rate!=null?a.rate/100:'',false,'min="0" step="0.01"')}
+     <div class="field full"><label for="f-notes">Notes / specifications</label><textarea id="f-notes" name="notes" placeholder="Brand, model, serial no, condition…">${esc(a?.notes||'')}</textarea></div>
+   </div>`,
+   async d=>{
+     const photo=getPhoto();
+     await api('/assets'+(a?'/'+a.id:''),a?'PATCH':'POST',{
+       ...d,
+       qty:Number(d.qty),
+       rate:d.rate===''?null:Number(d.rate),
+       ...(photo?{photo}:{})
+     });
+     toast(a?'Asset updated':'Asset added');
+   }
+ );
+ getPhoto=photoBinding();
+ if(a&&a.photo){
+   const preview=$('#photo-preview');
+   if(preview){preview.src='/photo/thumb-'+a.photo;preview.classList.add('visible');}
+ }
+}
+
 async function usersPage(){
  const users=await api('/users');state.users=users;
  return pageHead('Team & access','Decide who can do what, and which sections they can access.',`<button class="primary" id="add-user">+ Add team member</button>`)+`<div class="notice"><strong>Main admin controls all member accounts.</strong><br>Other admins keep their assigned operational access; member management belongs only to the main admin.</div><section class="panel"><div class="table-wrap"><table><thead><tr><th>Person / login</th><th>Role</th><th>Section access</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(u.name)}</strong><small>${esc(u.username)} · ${u.login_provider==='google'?'Google sign-in':'Username & password'}</small></td><td><span class="badge ${u.full_access?'green':''}">${u.role}${u.full_access?' · full access':''}</span></td><td>${u.section_scope===null?'All properties & sections':u.section_scope.length?u.section_scope.map(id=>esc(state.context.sections.find(s=>s.id===id)?.name||'Section '+id)).join(', '):'No sections assigned'}</td><td>${u.full_access?'All modules and files':u.permissions.length+' granted actions'}</td><td>${statusBadge(u.active?'ACTIVE':'DISABLED')}</td><td>${u.role!=='MASTER'&&u.id!==state.user.id?`<button class="small primary" data-editaccess="${u.id}">Edit access</button> <button class="small" data-reset="${u.id}">Reset password</button> <button class="small ghost" data-disable="${u.id}">${u.active?'Disable':'Enable'}</button>`:u.is_owner?'Protected Master account':'Your account'}</td></tr>`).join('')}</tbody></table></div></section><p class="help">Permission or password changes sign the affected user out immediately. Private photos and downloadable reports follow the same section restrictions as the app.</p>`;
@@ -106,6 +303,7 @@ function bindPage(){
  $$('[data-count]').forEach(b=>b.onclick=()=>{state.page='counts';state.countSection=Number(b.dataset.count);render()});
  bindItems();
  bindReviews();
+ if(state.page==='assets')bindAssets();
  if($('#item-search'))$('#item-search').oninput=e=>{state.search=e.target.value;$('#item-table').innerHTML=inventoryTable();bindItems()};
  if($('#section-filter'))$('#section-filter').onchange=e=>{state.section=e.target.value;$('#item-table').innerHTML=inventoryTable();bindItems()};
  if($('#share-count'))$('#share-count').onclick=async()=>{try{const users=(await api('/users')).filter(u=>u.active&&u.role==='STAFF'&&u.permissions.includes('counts')&&(u.section_scope===null||u.section_scope.includes(state.countSection)));if(!users.length)return toast('Give a staff member count permission and section access first.');showModal('Share section with staff',`<p>The complete item list will be sent with blank count fields. Existing draft entries are kept in the audit history. Staff cannot see stock balances.</p>${selectField('Staff member','staff_id',users.map(u=>[u.id,u.name+' / '+u.username]))}`,async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'share',staff_id:Number(d.staff_id)});toast('Section shared with staff')})}catch(e){toast(e.message)}};

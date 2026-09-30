@@ -53,4 +53,17 @@ tr.selected td{background:#f3f7ee}
   .month-nav-group{width:100%;justify-content:space-between}
 }
 
+/* Property Assets Section */
+.asset-property-tabs{display:flex;gap:12px;margin-bottom:22px;flex-wrap:wrap}
+.asset-tab{display:inline-flex;align-items:center;gap:10px;padding:13px 22px;font-size:14px;font-weight:600;border-radius:12px;border:1px solid var(--line);background:white;color:var(--ink);cursor:pointer;transition:all .18s ease}
+.asset-tab:hover{background:#f3f6ee;border-color:#cfdac3;transform:translateY(-1px)}
+.asset-tab.active{background:var(--green);color:white;border-color:var(--green);box-shadow:0 3px 12px rgba(23,63,53,0.2)}
+.asset-tab .tab-badge{font-size:11px;padding:3px 9px;border-radius:10px;background:#eef2e7;color:var(--ink);font-weight:550}
+.asset-tab.active .tab-badge{background:rgba(255,255,255,0.22);color:white}
+.asset-tab svg{width:18px;height:18px}
+.asset-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 20px;background:#f3f6ee;border:1px solid #dce5d3;border-radius:12px;margin-bottom:22px}
+.asset-notice-text{font-size:12px;color:#45593c;line-height:1.6}
+.asset-notice-text strong{color:#2a3d22;display:block;font-size:13px;margin-bottom:2px}
+
+
 
