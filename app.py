@@ -1,9 +1,9 @@
-import os, json, sqlite3, secrets, uuid, io, base64, hashlib, time, re
+import os, json, sqlite3, secrets, uuid, io, base64, hashlib, time, re, copy
 from pathlib import Path
 from datetime import datetime, date, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import wraps
-from flask import Flask, request, jsonify, session, g, send_file, abort
+from flask import Flask, request, jsonify, session, g, send_file, abort, has_request_context
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ImageOps, UnidentifiedImageError
 import access
@@ -30,17 +30,59 @@ app.config.update(SECRET_KEY=os.environ.get('SESSION_SECRET') or secret.read_tex
 failures={}
 REASONS=['Accidental drop / handling','Staff handling damage','Guest-related damage','Wear and tear','Kitchen / service operation','Missing / unable to locate','Unknown','Other']
 def now(): return datetime.now().isoformat(timespec='seconds')
+_SHARED_TURSO_DB = None
+REPORT_CACHE = {}
+
+def invalidate_report_cache():
+    REPORT_CACHE.clear()
+
+class DBWrapper:
+    def __init__(self, conn):
+        self._conn = conn
+    def execute(self, sql, args=()):
+        first_word = sql.strip().split(None, 1)[0].upper() if sql and sql.strip() else ''
+        if first_word in ('INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER'):
+            invalidate_report_cache()
+        return self._conn.execute(sql, args)
+    def executemany(self, sql, params):
+        invalidate_report_cache()
+        return self._conn.executemany(sql, params)
+    def executescript(self, sql):
+        invalidate_report_cache()
+        return self._conn.executescript(sql)
+    def commit(self):
+        res = self._conn.commit()
+        invalidate_report_cache()
+        return res
+    def rollback(self):
+        res = self._conn.rollback()
+        invalidate_report_cache()
+        return res
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+    def __setattr__(self, name, value):
+        if name == '_conn':
+            super().__setattr__(name, value)
+        else:
+            setattr(self._conn, name, value)
+
 def db():
     if 'db' not in g:
         if os.environ.get('TURSO_DATABASE_URL'):
             if os.environ.get('DATABASE_URL'): raise RuntimeError('Configure only one cloud database provider')
-            from turso_database import Database
-            g.db=Database(os.environ['TURSO_DATABASE_URL'],os.environ.get('TURSO_AUTH_TOKEN',''))
+            global _SHARED_TURSO_DB
+            if _SHARED_TURSO_DB is None:
+                from turso_database import Database
+                _SHARED_TURSO_DB = DBWrapper(Database(os.environ['TURSO_DATABASE_URL'], os.environ.get('TURSO_AUTH_TOKEN','')))
+            g.db = _SHARED_TURSO_DB
         elif os.environ.get('DATABASE_URL'):
             from cloud_database import Database
-            g.db=Database(os.environ['DATABASE_URL'])
+            g.db = DBWrapper(Database(os.environ['DATABASE_URL']))
         else:
-            g.db=sqlite3.connect(DATA/'inventory.db',timeout=20); g.db.row_factory=sqlite3.Row; g.db.execute('PRAGMA foreign_keys=ON')
+            conn = sqlite3.connect(DATA/'inventory.db', timeout=20)
+            conn.row_factory = sqlite3.Row
+            conn.execute('PRAGMA foreign_keys=ON')
+            g.db = DBWrapper(conn)
     return g.db
 def rows(sql,args=()): return [dict(r) for r in db().execute(sql,args).fetchall()]
 def one(sql,args=()):
@@ -81,7 +123,10 @@ def need(role=None):
     return deco
 @app.teardown_appcontext
 def teardown(e):
-    if 'db' in g: g.db.close()
+    if 'db' in g and not os.environ.get('TURSO_DATABASE_URL'):
+        g.db.close()
+    if has_request_context() and request.method != 'GET':
+        invalidate_report_cache()
 @app.errorhandler(Exception)
 def errors(e):
     from werkzeug.exceptions import HTTPException
@@ -160,9 +205,22 @@ def item(i):
     return r
 
 def report(sid,m):
+    cache_key = (sid, m)
+    now_ts = time.time()
+    can_cache = has_request_context() and request.method == 'GET'
     c=one('SELECT * FROM counts WHERE section_id=? AND month=?',(sid,m))
     if c and c['status']=='CLOSED':
-        return json.loads(one('SELECT data FROM snapshots WHERE count_id=? ORDER BY version DESC LIMIT 1',(c['id'],))['data'])
+        if cache_key in REPORT_CACHE:
+            ts, cached = REPORT_CACHE[cache_key]
+            if now_ts - ts < 60:
+                return copy.deepcopy(cached)
+        data = json.loads(one('SELECT data FROM snapshots WHERE count_id=? ORDER BY version DESC LIMIT 1',(c['id'],))['data'])
+        REPORT_CACHE[cache_key] = (now_ts, data)
+        return copy.deepcopy(data)
+    if can_cache and cache_key in REPORT_CACHE:
+        ts, cached = REPORT_CACHE[cache_key]
+        if now_ts - ts < 30:
+            return copy.deepcopy(cached)
     prev=one("SELECT c.id,c.month FROM counts c WHERE section_id=? AND month<? AND status='CLOSED' ORDER BY month DESC LIMIT 1",(sid,m))
     previous={}
     if prev: previous={r['id']:r for r in json.loads(one('SELECT data FROM snapshots WHERE count_id=? ORDER BY version DESC LIMIT 1',(prev['id'],))['data'])}
@@ -184,7 +242,9 @@ def report(sid,m):
         line=count_lines.get(i['id'])
         actual=line['actual'] if line else None
         result.append(dict(i,submitted_by=(line.get('username') or '') if line else '',review_note=line.get('review_note','') if line else '',needs_correction=line.get('needs_correction',0) if line else 0,previous=opening,added=added,damage=damage,adjustment=adjustment,expected=expected,actual=actual,difference=actual-expected if actual is not None else None,note=line['note'] if line else '',flag=line['flag'] if line else '',purchase_value=sum(x['qty']*x['rate'] for x in moves if x['type'] in ('OPENING','PURCHASE') and x['rate'] is not None),breakage_qty=-sum(x['qty'] for x in moves if x['type']=='BREAKAGE'),breakage_value=sum(-x['qty']*x['rate'] for x in moves if x['type']=='BREAKAGE' and x['rate'] is not None),missing_rates=sum(x['rate'] is None for x in moves)))
-    return result
+    if can_cache:
+        REPORT_CACHE[cache_key] = (now_ts, result)
+    return copy.deepcopy(result)
 
 def save_photo(encoded):
     if not encoded or not isinstance(encoded,str): fail('A photo is required.')
@@ -455,8 +515,10 @@ def history(iid):
 def counts():
     m=month(request.args.get('month',date.today().isoformat()[:7])); result=[]
     if g.user['access_role']=='STAFF' and m!=date.today().isoformat()[:7]: fail('The count month is set automatically. Open older corrections from Corrections.',403)
-    for s in [s for s in visible_sections() if s['active']]:
-        c=one('SELECT * FROM counts WHERE section_id=? AND month=?',(s['id'],m))
+    secs=[s for s in visible_sections() if s['active']]
+    all_counts={c['section_id']:c for c in rows('SELECT * FROM counts WHERE month=?',(m,))}
+    for s in secs:
+        c=all_counts.get(s['id'])
         if c and c['submitted_by'] is not None and c['submitted_by']!=g.user['id'] and (g.user['access_role']=='STAFF' or (c['status']=='RETURNED' and not access.owner())): continue
         rr=report(s['id'],m)
         result.append(dict(s,count_id=c['id'] if c else None,status=c['status'] if c else 'OPEN',total=len(rr),completed=0 if g.user['access_role']=='STAFF' and c and c['submitted_by'] is None else sum(r['actual'] is not None for r in rr)))
