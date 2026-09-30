@@ -3,7 +3,7 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelect
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icons={home:'M3 10l9-7 9 7v10H3z M9 20v-7h6v7',box:'M3 7l9-4 9 4v13H3z M3 7l9 5 9-5 M12 12v8',count:'M8 4H5v17h14V4h-3 M9 2h6v5H9z M8 12h8 M8 16h5',break:'M13 2l-3 7 5 3-5 10 M5 4H2v17h7 M16 4h6v17h-9',report:'M4 3h12l4 4v14H4z M8 16v-3 M12 16V9 M16 16v-5',users:'M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-3a4 4 0 0 0-3-4 M17 2a4 4 0 0 1 0 8',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2',audit:'M4 4h16v16H4z M8 8h8 M8 12h8 M8 16h4',arrow:'M5 12h14 M13 6l6 6-6 6',plus:'M12 5v14 M5 12h14',photo:'M3 6h5l2-3h4l2 3h5v15H3z M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8',logout:'M9 3H3v18h6 M9 12h12 M17 8l4 4-4 4',asset:'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16'};
 const icon=n=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[n]||icons.box}"/></svg>`;
-const state={user:null,csrf:'',page:'dashboard',property:'1',assetProperty:'1',assetSearch:'',selectedAssets:new Set(),month:'',section:'',items:[],context:null,reportKind:'inventory',countSection:null,search:'',auditOffset:0};
+const state={user:null,csrf:'',page:'dashboard',property:'1',assetProperty:'1',assetSearch:'',selectedAssets:new Set(),month:'',section:'',items:[],context:null,reportKind:'inventory',countSection:null,countTab:'remaining',countSearch:'',reviewTab:'breakage',search:'',auditOffset:0};
 let renderVersion=0;
 const can=p=>!!state.user?.permissions?.includes(p);
 const master=()=>can('view_totals');
@@ -62,7 +62,158 @@ function inventoryTable(){
 async function countsPage(){if(state.countSection)return countView();if(!state.context)state.context=await api('/context');state.month=state.context.today.slice(0,7);if($('#staff-count-month'))$('#staff-count-month').textContent=monthLabel()+' · automatic';if($('#workspace-month'))$('#workspace-month').textContent=monthLabel()+' · automatic';const cc=(await api('/counts?month='+state.month)).filter(c=>!state.property||String(c.property_id)===state.property);return pageHead('Monthly inventory','Count each item, review your entries, then submit the section.')+`<div class="notice"><strong>${master()?'A clear close, a reliable start.':'Blind counting is on.'}</strong> ${master()?'Once closed, actual quantities become the next period’s opening stock. Submitted sections are locked until reopened.':'Enter the quantities you physically see. Expected stock and differences are only available to authorized reviewers.'}</div><div class="section-cards">${cc.map(c=>`<section class="section-card"><div class="row"><span class="section-icon">${icon('count')}</span><span class="spacer"></span>${statusBadge(c.status)}</div><h3>${esc(c.name)}</h3><p>${state.context.properties.find(p=>p.id===c.property_id)?.name} · ${c.total} items</p><div class="progress"><span style="width:${c.total?100*c.completed/c.total:0}%"></span></div><div class="row"><span class="help">${c.completed} of ${c.total} counted</span><span class="spacer"></span><button data-count="${c.id}" class="small primary">${c.status==='CLOSED'?'View count':'Open count'} →</button></div></section>`).join('')}</div>`}
 function drafts(){try{return JSON.parse(localStorage.getItem('count-drafts-'+state.user.id)||'{}')}catch{return {}}}
 function writeDraft(k,v){const d=drafts();if(v===null)delete d[k];else d[k]=v;localStorage.setItem('count-drafts-'+state.user.id,JSON.stringify(d))}
-async function countView(){const data=await api(`/counts/${state.countSection}/${state.month}`);state.countData=data;const sec=state.context.sections.find(s=>s.id===state.countSection);const locked=['SUBMITTED','CLOSED'].includes(data.status)||!can('counts')||(data.submitter&&data.submitter.id!==state.user.id&&!data.can_review);const local=drafts();for(const r of data.items){const d=local[`${state.countSection}/${state.month}/${r.id}`];if(d&&!locked)Object.assign(r,d)}return pageHead(esc(sec.name)+' · Physical count',staffMode()?'Enter the quantity you physically counted for every item. Submit the complete section to master.':'Expected = previous accepted count + approved stock − approved breakage. Differences need admin review.',`<button id="back-counts">← All sections</button>`)+`<section class="panel"><div class="panel-head"><div><h2>${monthLabel()} ${statusBadge(data.status)}</h2><p>${data.submitter?`Submitted by ${esc(data.submitter.username)} · ID ${data.submitter.id} · `:''}<span id="count-progress">${data.items.filter(r=>r.actual!==null).length}</span> / ${data.items.length} items counted · <span id="sync-status">${Object.keys(local).length?'Pending drafts':'All changes saved'}</span></p></div><div class="actions">${state.user.is_owner&&!['SUBMITTED','CLOSED','RETURNED'].includes(data.status)?'<button id="share-count">Share with staff</button>':''}${!locked?'<button id="submit-count" class="primary">Submit full section</button>':''}${data.can_review&&data.status==='SUBMITTED'?'<button id="close-count" class="primary">Accept & close month</button>':''}${data.can_review&&['SUBMITTED','RETURNED'].includes(data.status)?'<button id="return-count-list">Return marked items</button>':''}${data.can_review&&['SUBMITTED','CLOSED'].includes(data.status)?'<button id="reopen-count">Reopen</button>':''}</div></div>${data.items.some(r=>r.needs_correction)?`<div class="notice"><strong>Items to recheck</strong>${data.items.filter(r=>r.needs_correction).map(r=>`<p>${esc(r.name)}: ${esc(r.review_note)}</p>`).join('')}</div>`:''}${data.items.length?`<div class="table-wrap"><table class="count-table"><thead><tr><th>Item</th>${master()?'<th>Previous</th><th>Added</th><th>Damage</th><th>Expected</th>':''}<th>Actual count</th>${master()?'<th>Difference</th>':''}<th>Status / note</th></tr></thead><tbody>${data.items.map(r=>`<tr data-line="${r.id}"><td class="name">${itemCell(r)}<small>${esc(r.specification)}</small><small>Counted by: ${esc(r.submitted_by||'Not yet counted')}</small></td>${master()?`<td>${qty(r.previous)}</td><td>${qty(r.added)}</td><td>${qty(r.damage)}</td><td>${qty(r.expected)}</td>`:''}<td><input class="count-input" data-actual type="number" min="0" step="1" value="${r.actual===null?'':r.actual}" ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Actual ${esc(r.name)}"><small data-saved class="saved"></small></td>${master()?`<td class="${r.difference<0?'negative':''}" data-difference>${qty(r.difference)}${r.difference?'<small>Unexplained difference</small>':''}</td>`:''}<td><select data-flag ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Count status ${esc(r.name)}"><option value="">Counted</option><option value="NOT_FOUND" ${r.flag==='NOT_FOUND'?'selected':''}>Not found</option><option value="NOT_APPLICABLE" ${r.flag==='NOT_APPLICABLE'?'selected':''}>Not applicable</option></select><input data-note class="count-note" placeholder="Note / exception reason" value="${esc(r.note)}" ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Note ${esc(r.name)}">${r.review_note?`<p class="notice">${r.needs_correction?'Correction needed':'Review note'}: ${esc(r.review_note)}</p>`:''}${data.can_review&&['SUBMITTED','RETURNED'].includes(data.status)?`<label class="count-mark"><input type="checkbox" data-mark-count value="${r.id}"> Mark for recheck</label>`:''}</td></tr>`).join('')}</tbody></table></div>`:empty('There are no items in this section yet.')}</section><p class="help">${locked?'This count is read-only. Reopening requires review permission and a recorded reason.':'Zero is a valid count. A blank field has not been counted. Not found / not applicable requires an explicit quantity and a note.'}</p>`}
+function isItemCounted(r){return r.actual!==null&&r.actual!==''&&r.actual!==undefined}
+
+function updateCountBadges(data){
+ if(!data||!data.items)return;
+ const counted=data.items.filter(isItemCounted).length;
+ const uncounted=data.items.length-counted;
+ const bu=$('#badge-uncounted'),bc=$('#badge-counted'),ba=$('#badge-all'),cp=$('#count-progress');
+ if(bu){bu.textContent=uncounted;bu.classList.toggle('amber',uncounted>0)}
+ if(bc)bc.textContent=counted;
+ if(ba)ba.textContent=data.items.length;
+ if(cp)cp.textContent=counted;
+}
+
+function countItemsTable(data,locked){
+ if(!data.items.length)return empty('There are no items in this section yet.','count');
+ const q=(state.countSearch||'').trim().toLowerCase();
+ let visible=data.items;
+ if(state.countTab==='remaining')visible=visible.filter(r=>!isItemCounted(r));
+ else if(state.countTab==='counted')visible=visible.filter(isItemCounted);
+ if(q)visible=visible.filter(r=>`${r.name} ${r.code||''} ${r.specification||''}`.toLowerCase().includes(q));
+
+ if(!visible.length){
+  if(state.countTab==='remaining'&&data.items.every(isItemCounted)){
+   return `<div class="empty" style="padding:40px 20px;text-align:center"><div style="font-size:36px;margin-bottom:10px">🎉</div><h3 style="font-size:17px;font-weight:700;margin-bottom:6px">All items counted!</h3><p class="help" style="max-width:440px;margin:0 auto 16px">Every item in this section has been marked Done and saved.</p><div class="actions" style="justify-content:center;gap:10px">${!locked?'<button type="button" class="primary" id="submit-from-empty">Submit full section to master →</button>':''}<button type="button" class="ghost" data-count-filter="counted">Review counted items</button></div></div>`;
+  }
+  if(state.countTab==='remaining')return empty('No uncounted items remaining'+(q?' matching your search':'')+'.','count');
+  if(state.countTab==='counted')return empty('No items have been counted yet. Enter actual counts and click Done.','count');
+  return empty('No matching items found.','count');
+ }
+
+ return `<div class="table-wrap"><table class="count-table"><thead><tr><th>Item</th>${master()?'<th>Previous</th><th>Added</th><th>Damage</th><th>Expected</th>':''}<th>Actual count</th>${master()?'<th>Difference</th>':''}<th>Status / note</th></tr></thead><tbody>${visible.map(r=>{
+  const counted=isItemCounted(r);
+  return `<tr data-line="${r.id}" class="${counted?'counted-row':''}"><td class="name">${itemCell(r)}<small>${esc(r.specification||'')}</small><small>Counted by: ${esc(r.submitted_by||'Not yet counted')}</small></td>${master()?`<td>${qty(r.previous)}</td><td>${qty(r.added)}</td><td>${qty(r.damage)}</td><td>${qty(r.expected)}</td>`:''}<td><div class="count-input-group"><input class="count-input" data-actual type="number" min="0" step="1" value="${counted?r.actual:''}" ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Actual ${esc(r.name)}" placeholder="0">${!locked?`<button type="button" class="primary small count-done-btn" data-done-line="${r.id}" title="Save count and mark done">✓ Done</button>${counted?`<button type="button" class="ghost small count-undone-btn" data-uncount-line="${r.id}" title="Reset to uncounted">↺ Reset</button>`:''}`:''}</div><small data-saved class="saved"></small></td>${master()?`<td class="${(r.difference||0)<0?'negative':''}" data-difference>${counted?qty(r.difference):'—'}${counted&&r.difference?'<small>Unexplained difference</small>':''}</td>`:''}<td><select data-flag ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Count status ${esc(r.name)}"><option value="">Counted</option><option value="NOT_FOUND" ${r.flag==='NOT_FOUND'?'selected':''}>Not found</option><option value="NOT_APPLICABLE" ${r.flag==='NOT_APPLICABLE'?'selected':''}>Not applicable</option></select><input data-note class="count-note" placeholder="Note / exception reason" value="${esc(r.note||'')}" ${locked||(data.status==='RETURNED'&&(!r.review_note||data.submitter?.id!==state.user.id))?'disabled':''} aria-label="Note ${esc(r.name)}">${r.review_note?`<p class="notice">${r.needs_correction?'Correction needed':'Review note'}: ${esc(r.review_note)}</p>`:''}${data.can_review&&['SUBMITTED','RETURNED'].includes(data.status)?`<label class="count-mark"><input type="checkbox" data-mark-count value="${r.id}"> Mark for recheck</label>`:''}</td></tr>`;
+ }).join('')}</tbody></table></div>`;
+}
+
+function bindCountRows(data,locked){
+ if(!data)return;
+ const container=$('#count-items-container');
+ if(!container)return;
+
+ const submitEmpty=$('#submit-from-empty',container);
+ if(submitEmpty)submitEmpty.onclick=()=>$('#submit-count')?.click();
+
+ $$('[data-count-filter]',container).forEach(b=>{
+  b.onclick=()=>{
+   state.countTab=b.dataset.countFilter;
+   $$('[data-count-filter]').forEach(btn=>btn.classList.toggle('active',btn.dataset.countFilter===state.countTab));
+   container.innerHTML=countItemsTable(data,locked);
+   bindCountRows(data,locked);
+  };
+ });
+
+ $$('[data-actual]',container).forEach(input=>{
+  input.onkeydown=e=>{
+   if(e.key==='Enter'){
+    e.preventDefault();
+    const row=input.closest('tr');
+    $('[data-done-line]',row)?.click();
+   }
+  };
+ });
+
+ $$('[data-flag],[data-note]',container).forEach(input=>{
+  input.onchange=async()=>{
+   const row=input.closest('tr');
+   const itemId=Number(row?.dataset.line);
+   const r=data.items.find(i=>i.id===itemId);
+   if(!r)return;
+   r.flag=$('[data-flag]',row)?.value||'';
+   r.note=$('[data-note]',row)?.value||'';
+   if(isItemCounted(r)){
+    const key=`${state.countSection}/${state.month}/${r.id}`;
+    writeDraft(key,{item_id:r.id,actual:r.actual,note:r.note,flag:r.flag});
+    await syncDrafts();
+   }
+  };
+ });
+
+ $$('[data-done-line]',container).forEach(btn=>{
+  btn.onclick=async()=>{
+   const row=btn.closest('tr');
+   const itemId=Number(btn.dataset.doneLine);
+   const r=data.items.find(i=>i.id===itemId);
+   const a=$('[data-actual]',row);
+   if(!a||a.value.trim()===''){toast('Enter a quantity of 0 or more before clicking Done.');a?.focus();return}
+   const val=a.value.trim();
+   if(!Number.isInteger(Number(val))||Number(val)<0){toast('Enter a whole quantity of zero or more.');a.focus();return}
+   const flag=$('[data-flag]',row)?.value||'';
+   const note=$('[data-note]',row)?.value||'';
+   if(flag&&!note.trim()){toast('Add a note for this exception.');return}
+
+   r.actual=Number(val);
+   r.flag=flag;
+   r.note=note;
+   if(r.expected!=null)r.difference=Number(val)-Number(r.expected);
+
+   const key=`${state.countSection}/${state.month}/${r.id}`;
+   writeDraft(key,{item_id:r.id,actual:r.actual,note,flag});
+   const savedEl=$('[data-saved]',row);
+   if(savedEl)savedEl.textContent='Saving…';
+   await syncDrafts();
+   if(savedEl)savedEl.textContent=drafts()[key]?'Saved on device':'Saved';
+
+   updateCountBadges(data);
+   toast(`Recorded: ${r.name} = ${r.actual}`);
+
+   if(state.countTab==='remaining'){
+    row.classList.add('count-row-fade');
+    setTimeout(()=>{
+     container.innerHTML=countItemsTable(data,locked);
+     bindCountRows(data,locked);
+    },200);
+   }else{
+    container.innerHTML=countItemsTable(data,locked);
+    bindCountRows(data,locked);
+   }
+  };
+ });
+
+ $$('[data-uncount-line]',container).forEach(btn=>{
+  btn.onclick=()=>{
+   const itemId=Number(btn.dataset.uncountLine);
+   const r=data.items.find(i=>i.id===itemId);
+   if(!r)return;
+   r.actual=null;
+   r.flag='';
+   r.note='';
+   if(r.expected!=null)r.difference=null;
+   const key=`${state.countSection}/${state.month}/${r.id}`;
+   writeDraft(key,null);
+   updateCountBadges(data);
+   toast(`Reset ${r.name} to uncounted`);
+   container.innerHTML=countItemsTable(data,locked);
+   bindCountRows(data,locked);
+  };
+ });
+}
+
+async function countView(){
+ const data=await api(`/counts/${state.countSection}/${state.month}`);
+ state.countData=data;
+ if(!state.countTab)state.countTab='remaining';
+ const sec=state.context.sections.find(s=>s.id===state.countSection);
+ const locked=['SUBMITTED','CLOSED'].includes(data.status)||!can('counts')||(data.submitter&&data.submitter.id!==state.user.id&&!data.can_review);
+ const local=drafts();
+ for(const r of data.items){const d=local[`${state.countSection}/${state.month}/${r.id}`];if(d&&!locked)Object.assign(r,d)}
+ const countedCount=data.items.filter(isItemCounted).length;
+ const uncountedCount=data.items.length-countedCount;
+
+ return pageHead(esc(sec.name)+' · Physical count',staffMode()?'Enter the quantity you physically counted for each item. Click Done to submit an item.':'Expected = previous accepted count + approved stock − approved breakage. Differences need admin review.',`<button id="back-counts">← All sections</button>`)+`<section class="panel"><div class="panel-head"><div><h2>${monthLabel()} ${statusBadge(data.status)}</h2><p>${data.submitter?`Submitted by ${esc(data.submitter.username)} · ID ${data.submitter.id} · `:''}<span id="count-progress">${countedCount}</span> / ${data.items.length} items counted · <span id="sync-status">${Object.keys(local).length?'Pending drafts':'All changes saved'}</span></p></div><div class="actions">${state.user.is_owner&&!['SUBMITTED','CLOSED','RETURNED'].includes(data.status)?'<button id="share-count">Share with staff</button>':''}${!locked?'<button id="submit-count" class="primary">Submit full section</button>':''}${data.can_review&&data.status==='SUBMITTED'?'<button id="close-count" class="primary">Accept & close month</button>':''}${data.can_review&&['SUBMITTED','RETURNED'].includes(data.status)?'<button id="return-count-list">Return marked items</button>':''}${data.can_review&&['SUBMITTED','CLOSED'].includes(data.status)?'<button id="reopen-count">Reopen</button>':''}</div></div>${data.items.some(r=>r.needs_correction)?`<div class="notice"><strong>Items to recheck</strong>${data.items.filter(r=>r.needs_correction).map(r=>`<p>${esc(r.name)}: ${esc(r.review_note)}</p>`).join('')}</div>`:''}<div class="count-filter-bar"><div class="count-filter-tabs" role="tablist"><button type="button" class="count-tab ${state.countTab==='remaining'?'active':''}" data-count-filter="remaining" role="tab" aria-selected="${state.countTab==='remaining'}"><span>To Count (Remaining)</span><span class="count-badge ${uncountedCount>0?'amber':''}" id="badge-uncounted">${uncountedCount}</span></button><button type="button" class="count-tab ${state.countTab==='counted'?'active':''}" data-count-filter="counted" role="tab" aria-selected="${state.countTab==='counted'}"><span>Already Counted</span><span class="count-badge" id="badge-counted">${countedCount}</span></button><button type="button" class="count-tab ${state.countTab==='all'?'active':''}" data-count-filter="all" role="tab" aria-selected="${state.countTab==='all'}"><span>All Items</span><span class="count-badge" id="badge-all">${data.items.length}</span></button></div><div class="count-search-box"><input type="search" id="count-search-input" placeholder="Search item in this section…" value="${esc(state.countSearch||'')}" aria-label="Search items in section"></div></div><div id="count-items-container">${countItemsTable(data,locked)}</div></section><p class="help">${locked?'This count is read-only. Reopening requires review permission and a recorded reason.':'Enter count and click Done. Counted items move out of the uncounted view so you can focus on remaining items. You can view or reset already counted items in the "Already Counted" tab.'}</p>`;
+}
 let syncRunning=false;
 async function syncDrafts(){if(!state.user||syncRunning||!navigator.onLine)return;syncRunning=true;let progressed=false;try{for(const [k,v]of Object.entries(drafts())){try{await api('/counts/'+k.split('/').slice(0,2).join('/'),'POST',{...v,action:'save'});const current=drafts()[k];if(JSON.stringify(current)===JSON.stringify(v))writeDraft(k,null);progressed=true}catch(e){if($('#sync-status'))$('#sync-status').textContent=e.message;break}}if($('#sync-status'))$('#sync-status').textContent=Object.keys(drafts()).length?'Drafts pending — reconnect or resolve count lock':'All changes saved'}finally{syncRunning=false;if(progressed&&Object.keys(drafts()).length)setTimeout(syncDrafts,300)}}
 async function breakagePage(){
@@ -300,7 +451,7 @@ function bindPage(){
  $$('[data-addinventory]').forEach(b=>{if(!can('add_items')&&!can('purchases'))b.remove();else b.onclick=()=>inventoryEntry()});
  $$('[data-additem]').forEach(b=>b.onclick=()=>itemForm());
  $$('[data-move]').forEach(b=>b.onclick=()=>movementForm(b.dataset.move));
- $$('[data-count]').forEach(b=>b.onclick=()=>{state.page='counts';state.countSection=Number(b.dataset.count);render()});
+ $$('[data-count]').forEach(b=>b.onclick=()=>{state.page='counts';state.countSection=Number(b.dataset.count);state.countTab='remaining';state.countSearch='';render()});
  bindItems();
  bindReviews();
  if(state.page==='assets')bindAssets();
@@ -308,8 +459,27 @@ function bindPage(){
  if($('#section-filter'))$('#section-filter').onchange=e=>{state.section=e.target.value;$('#item-table').innerHTML=inventoryTable();bindItems()};
  if($('#share-count'))$('#share-count').onclick=async()=>{try{const users=(await api('/users')).filter(u=>u.active&&u.role==='STAFF'&&u.permissions.includes('counts')&&(u.section_scope===null||u.section_scope.includes(state.countSection)));if(!users.length)return toast('Give a staff member count permission and section access first.');showModal('Share section with staff',`<p>The complete item list will be sent with blank count fields. Existing draft entries are kept in the audit history. Staff cannot see stock balances.</p>${selectField('Staff member','staff_id',users.map(u=>[u.id,u.name+' / '+u.username]))}`,async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'share',staff_id:Number(d.staff_id)});toast('Section shared with staff')})}catch(e){toast(e.message)}};
  if($('#back-counts'))$('#back-counts').onclick=()=>{state.countSection=null;render()};
- $$('[data-line]').forEach(row=>{for(const input of $$('[data-actual],[data-note],[data-flag]',row))input.addEventListener('change',async()=>{const a=$('[data-actual]',row);if(a.value==='')return;const v={item_id:Number(row.dataset.line),actual:a.value,note:$('[data-note]',row).value,flag:$('[data-flag]',row).value};if(!Number.isInteger(Number(v.actual))||Number(v.actual)<0){toast('Enter a whole quantity of zero or more.');return}if(v.flag&&!v.note.trim()){toast('Add a note for this exception.');return}const key=`${state.countSection}/${state.month}/${v.item_id}`;writeDraft(key,v);$('[data-saved]',row).textContent='Saving…';await syncDrafts();$('[data-saved]',row).textContent=drafts()[key]?'Saved on device':'Saved';$('#count-progress').textContent=$$('[data-actual]').filter(e=>e.value!=='').length;const r=state.countData.items.find(i=>i.id===v.item_id);if(master()&&$('[data-difference]',row))$('[data-difference]',row).textContent=Number(v.actual)-r.expected})});
- for(const [id,action]of [['submit-count','submit'],['close-count','close'],['reopen-count','reopen']])if($('#'+id))$('#'+id).onclick=()=>showModal(action==='close'?'Close this month?':action==='reopen'?'Reopen this count?':'Submit your count?',`<p class="help">${action==='close'?'This saves an immutable snapshot and archives Excel/PDF reports. Actual quantities become the next period’s opening stock.':action==='reopen'?'Reopening unlocks this section. Previous snapshots and exports remain in the archive.':'Check all physical quantities before submitting. An authorized reviewer will review the differences.'}</p>${action==='reopen'?field('Reason for reopening','reason','text','',true):''}`,async d=>{await syncDrafts();if(Object.keys(drafts()).some(k=>k.startsWith(`${state.countSection}/${state.month}/`)))throw new Error('Sync pending count drafts before submitting.');await api(`/counts/${state.countSection}/${state.month}`,'POST',{action,...d});toast('Count '+(action==='close'?'closed':action==='submit'?'submitted':'reopened'))});
+ if(state.page==='counts'&&state.countSection&&state.countData){
+  const locked=['SUBMITTED','CLOSED'].includes(state.countData.status)||!can('counts')||(state.countData.submitter&&state.countData.submitter.id!==state.user.id&&!state.countData.can_review);
+  bindCountRows(state.countData,locked);
+  $$('[data-count-filter]').forEach(b=>{
+   b.onclick=()=>{
+    state.countTab=b.dataset.countFilter;
+    $$('[data-count-filter]').forEach(btn=>btn.classList.toggle('active',btn.dataset.countFilter===state.countTab));
+    $('#count-items-container').innerHTML=countItemsTable(state.countData,locked);
+    bindCountRows(state.countData,locked);
+   };
+  });
+  if($('#count-search-input'))$('#count-search-input').oninput=e=>{
+   state.countSearch=e.target.value;
+   $('#count-items-container').innerHTML=countItemsTable(state.countData,locked);
+   bindCountRows(state.countData,locked);
+  };
+ }
+  for(const [id,action]of [['submit-count','submit'],['close-count','close'],['reopen-count','reopen']])if($('#'+id))$('#'+id).onclick=()=>{
+   const uncounted=state.countData?.items.filter(r=>!isItemCounted(r)).length||0;
+   showModal(action==='close'?'Close this month?':action==='reopen'?'Reopen this count?':'Submit your count?',`<p class="help">${action==='close'?'This saves an immutable snapshot and archives Excel/PDF reports. Actual quantities become the next period’s opening stock.':action==='reopen'?'Reopening unlocks this section. Previous snapshots and exports remain in the archive.':'Check all physical quantities before submitting. An authorized reviewer will review the differences.'}</p>${action==='submit'&&uncounted>0?`<div class="notice" style="margin-top:10px"><strong>Note:</strong> ${uncounted} item${uncounted===1?' is':'s are'} still uncounted in this section.</div>`:''}${action==='reopen'?field('Reason for reopening','reason','text','',true):''}`,async d=>{await syncDrafts();if(Object.keys(drafts()).some(k=>k.startsWith(`${state.countSection}/${state.month}/`)))throw new Error('Sync pending count drafts before submitting.');await api(`/counts/${state.countSection}/${state.month}`,'POST',{action,...d});toast('Count '+(action==='close'?'closed':action==='submit'?'submitted':'reopened'))});
+  };
  $$('[data-report]').forEach(b=>b.onclick=()=>{state.reportKind=b.dataset.report;render()});
  if($('#f-report_month'))$('#f-report_month').onchange=e=>{if(e.target.checkValidity()&&e.target.value){state.month=e.target.value;render()}};
  if($('#f-report_year'))$('#f-report_year').onchange=e=>{if(e.target.checkValidity()&&e.target.value){state.reportYear=e.target.value;render()}};
@@ -531,10 +701,49 @@ window.addEventListener('focus',refreshNotifications);
 async function reviewsPage(){
  const data=await api(staffMode()?'/corrections':'/reviews');state.reviewData=data;
  const priority={RETURNED:0,PENDING:1,ACCEPTED:2};data.submissions.sort((a,b)=>priority[a.status]-priority[b.status]||b.id-a.id);
- return pageHead(data.reviewer?'Review staff reports':'Corrections for you',staffMode()?'Only your returned lists appear here. Correct marked items, then send the complete list to master.':'Mark doubtful items and return the full list to its original submitter. Accept only when everything is correct.')+`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned item lists':'Stock & breakage submissions'}</h2><span class="badge">${data.submissions.filter(r=>r.status!=='ACCEPTED').length} awaiting action</span></div><div class="panel-body">${submissionLists(data)||'<p>No item corrections needed.</p>'}</div></section><section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2></div><div class="panel-body">${data.counts.map(c=>`<article class="review-card"><strong>${esc(c.section)} · ${esc(c.month)}</strong> ${statusBadge(c.status)}<p>Submitted by ${esc(c.username||'Legacy record')} · ID ${c.submitted_by||'—'}</p><button data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences':'View count / correct flagged items'}</button></article>`).join('')||'<p>No monthly count corrections needed.</p>'}</div></section>`;
+ if(!state.reviewTab)state.reviewTab='breakage';
+
+ const isBreakage=r=>['BREAKAGE','DAMAGE'].includes(r.payload?.type);
+ const isNewItem=r=>r.payload?.type==='NEW_ITEM';
+ const isPurchase=r=>r.payload?.type==='PURCHASE';
+
+ const breakageSubmissions=data.submissions.filter(isBreakage);
+ const newItemSubmissions=data.submissions.filter(isNewItem);
+ const purchaseSubmissions=data.submissions.filter(isPurchase);
+
+ const pendingFilter=r=>data.reviewer?r.status==='PENDING':r.status==='RETURNED';
+ const pendingBreakage=breakageSubmissions.filter(pendingFilter).length;
+ const pendingCounts=data.counts.filter(c=>data.reviewer?c.status==='SUBMITTED':c.status==='RETURNED').length;
+ const pendingNew=newItemSubmissions.filter(pendingFilter).length;
+ const pendingPurchases=purchaseSubmissions.filter(pendingFilter).length;
+ const totalPending=pendingBreakage+pendingCounts+pendingNew+pendingPurchases;
+
+ const overviewHtml=`<div class="stats approval-overview">${stat('Breakage section',pendingBreakage,data.reviewer?'Awaiting verification':'To correct','break')}${stat('Monthly count section',pendingCounts,data.reviewer?'Awaiting verification':'To correct','count')}${stat('New added items',pendingNew,data.reviewer?'Awaiting approval':'To correct','plus')}${stat('Total pending',totalPending,data.reviewer?'Pending review':'Returned to you','audit')}</div>`;
+
+ const categoryTabsHtml=`<div class="approval-category-tabs" role="tablist"><button type="button" class="approval-tab ${state.reviewTab==='breakage'?'active':''}" data-review-tab-btn="breakage" role="tab" aria-selected="${state.reviewTab==='breakage'}">${icon('break')}<span>Breakage section</span><span class="tab-badge ${pendingBreakage>0?'amber':''}">${pendingBreakage}</span></button><button type="button" class="approval-tab ${state.reviewTab==='counts'?'active':''}" data-review-tab-btn="counts" role="tab" aria-selected="${state.reviewTab==='counts'}">${icon('count')}<span>Monthly count section</span><span class="tab-badge ${pendingCounts>0?'amber':''}">${pendingCounts}</span></button><button type="button" class="approval-tab ${state.reviewTab==='new_item'?'active':''}" data-review-tab-btn="new_item" role="tab" aria-selected="${state.reviewTab==='new_item'}">${icon('plus')}<span>New added item</span><span class="tab-badge ${pendingNew>0?'amber':''}">${pendingNew}</span></button>${purchaseSubmissions.length?`<button type="button" class="approval-tab ${state.reviewTab==='purchases'?'active':''}" data-review-tab-btn="purchases" role="tab" aria-selected="${state.reviewTab==='purchases'}">${icon('box')}<span>Stock purchases</span><span class="tab-badge ${pendingPurchases>0?'amber':''}">${pendingPurchases}</span></button>`:''}<button type="button" class="approval-tab ${state.reviewTab==='all'?'active':''}" data-review-tab-btn="all" role="tab" aria-selected="${state.reviewTab==='all'}">${icon('report')}<span>All</span><span class="tab-badge">${totalPending}</span></button></div>`;
+
+ let contentHtml='';
+ if(state.reviewTab==='breakage'){
+  const listHtml=submissionLists({...data,submissions:breakageSubmissions});
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned breakage reports':'Breakage & damage verification'}</h2><span class="badge">${pendingBreakage} awaiting action</span></div><div class="panel-body">${listHtml||empty('No breakage reports awaiting review.','break')}</div></section>`;
+ }else if(state.reviewTab==='counts'){
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.length?data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">Submitted by ${esc(c.username||'Legacy record')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join(''):empty('No monthly count reviews or corrections needed.','count')}</div></section>`;
+ }else if(state.reviewTab==='new_item'){
+  const listHtml=submissionLists({...data,submissions:newItemSubmissions});
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned new item requests':'New item approval'}</h2><span class="badge">${pendingNew} awaiting action</span></div><div class="panel-body">${listHtml||empty('No new item submissions awaiting approval.','plus')}</div></section>`;
+ }else if(state.reviewTab==='purchases'){
+  const listHtml=submissionLists({...data,submissions:purchaseSubmissions});
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned purchases':'Stock purchase approvals'}</h2><span class="badge">${pendingPurchases} awaiting action</span></div><div class="panel-body">${listHtml||empty('No stock purchase submissions awaiting review.','box')}</div></section>`;
+ }else{
+  const listHtml=submissionLists(data);
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned item lists':'Stock & breakage submissions'}</h2><span class="badge">${data.submissions.filter(r=>r.status!=='ACCEPTED').length} awaiting action</span></div><div class="panel-body">${listHtml||'<p class="help">No item submissions awaiting review.</p>'}</div></section><section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">Submitted by ${esc(c.username||'Legacy record')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join('')||'<p class="help">No monthly count reviews needed.</p>'}</div></section>`;
+ }
+
+ return pageHead(data.reviewer?'Approvals & corrections':staffMode()?'Corrections for you':'Reports & approvals',staffMode()?'Only your returned lists appear here. Correct marked items, then send the complete list to master.':'Overview of submissions. Differentiate easily between breakage, monthly counts, and new added items.')+overviewHtml+categoryTabsHtml+contentHtml;
 }
 function bindReviews(){
- $$('[data-review-count]').forEach(b=>b.onclick=()=>{state.page='counts';state.countSection=Number(b.dataset.reviewCount);state.month=b.dataset.reviewMonth;render()});
+ $$('[data-review-tab-btn]').forEach(b=>b.onclick=()=>{state.reviewTab=b.dataset.reviewTabBtn;render()});
+ $$('[data-review-count]').forEach(b=>b.onclick=()=>{state.page='counts';state.countSection=Number(b.dataset.reviewCount);state.countTab='remaining';state.countSearch='';state.month=b.dataset.reviewMonth;render()});
  $$('[data-review-photo]').forEach(b=>b.onclick=()=>showModal('Report photo',`<img class="preview-full" src="/photo/${esc(b.dataset.reviewPhoto)}" alt="Submitted evidence">`));
  for(const [attr,action] of [['acceptReport','accept'],['returnReport','return']]){
   const selector=attr==='acceptReport'?'[data-accept-report]':'[data-return-report]';

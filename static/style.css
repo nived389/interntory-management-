@@ -65,5 +65,44 @@ tr.selected td{background:#f3f7ee}
 .asset-notice-text{font-size:12px;color:#45593c;line-height:1.6}
 .asset-notice-text strong{color:#2a3d22;display:block;font-size:13px;margin-bottom:2px}
 
+/* Monthly Count Focus & Done Workflow */
+.count-filter-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.count-search-box input{min-width:220px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:13px}
+.count-filter-tabs{display:flex;gap:8px;flex-wrap:wrap}
+.count-tab{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:10px;border:1px solid var(--line);background:white;font-size:13px;font-weight:550;color:var(--ink);cursor:pointer;transition:all .15s ease}
+.count-tab:hover{background:#f3f6ee;border-color:#cfdac3}
+.count-tab.active{background:var(--green);color:white;border-color:var(--green);box-shadow:0 2px 8px rgba(23,63,53,0.18)}
+.count-tab .count-badge{font-size:11px;padding:2px 8px;border-radius:10px;background:#eef1ea;color:var(--ink);font-weight:600}
+.count-tab.active .count-badge{background:rgba(255,255,255,0.22);color:white}
+.count-tab .count-badge.amber{background:#fff0d9;color:#9b651b}
+.count-tab.active .count-badge.amber{background:rgba(255,230,180,0.35);color:#fff}
+.count-input-group{display:inline-flex;align-items:center;gap:6px}
+.count-input-group .count-input{width:88px;text-align:center;font-weight:600;min-height:36px;padding:6px 8px}
+.count-done-btn{padding:8px 12px;border-radius:7px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.count-undone-btn{padding:5px 9px;font-size:11px;margin-left:6px}
+.count-row-fade{transition:opacity .25s ease, transform .25s ease;opacity:0;transform:translateX(14px);pointer-events:none}
+tr.counted-row td{background:#fbfdf9}
+
+/* Approval & Correction Categories */
+.approval-overview{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.approval-category-tabs{display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap}
+.approval-tab{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;font-size:13px;font-weight:600;border-radius:12px;border:1px solid var(--line);background:white;color:var(--ink);cursor:pointer;transition:all .18s ease}
+.approval-tab:hover{background:#f3f6ee;border-color:#cfdac3;transform:translateY(-1px)}
+.approval-tab.active{background:var(--green);color:white;border-color:var(--green);box-shadow:0 3px 12px rgba(23,63,53,0.18)}
+.approval-tab .tab-badge{font-size:11px;padding:3px 9px;border-radius:10px;background:#eef2e7;color:var(--ink);font-weight:600}
+.approval-tab.active .tab-badge{background:rgba(255,255,255,0.22);color:white}
+.approval-tab .tab-badge.amber{background:#fcefdc;color:#a0681c}
+.approval-tab.active .tab-badge.amber{background:rgba(255,230,190,0.3);color:#fff}
+.approval-tab svg{width:18px;height:18px}
+@media(max-width:740px){
+  .approval-overview{grid-template-columns:repeat(2,1fr);gap:10px}
+  .approval-tab{width:100%;justify-content:space-between}
+  .count-filter-bar{flex-direction:column;align-items:stretch}
+  .count-filter-tabs{width:100%}
+  .count-tab{flex:1;justify-content:center;padding:9px 10px;font-size:12px}
+  .count-input-group{width:100%}
+  .count-input-group .count-input{flex:1}
+}
+
 
 
