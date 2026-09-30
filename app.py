@@ -144,13 +144,20 @@ def need(role=None):
     return deco
 @app.teardown_appcontext
 def teardown(e):
-    if 'db' in g and not os.environ.get('TURSO_DATABASE_URL'):
-        g.db.close()
+    if 'db' in g:
+        if e is not None:
+            try: g.db.rollback()
+            except Exception: pass
+        if not os.environ.get('TURSO_DATABASE_URL'):
+            g.db.close()
     if has_request_context() and request.method != 'GET':
         invalidate_report_cache()
 @app.errorhandler(Exception)
 def errors(e):
     from werkzeug.exceptions import HTTPException
+    try:
+        if 'db' in g: g.db.rollback()
+    except Exception: pass
     if isinstance(e,HTTPException): return jsonify(error=e.description),e.code
     if isinstance(e,sqlite3.IntegrityError): return jsonify(error='This record already exists or conflicts with saved history.'),409
     app.logger.exception('Request failed')
@@ -369,9 +376,11 @@ def item_options():
 @need()
 def create_item():
     d=request.json; sid=number(d.get('section_id'),1); section(sid); m=date.today().isoformat()[:7]
-    if not d.get('name','').strip() or not d.get('specification','').strip(): fail('Item name and specification are required.')
-    qty=number(d.get('qty',0)); rate=money(d.get('rate')); photo=save_photo(d.get('photo'))
+    if not d.get('name','').strip(): fail('Item name is required.')
+    qty=number(d.get('qty',0)); rate=money(d.get('rate'))
     db().execute('BEGIN IMMEDIATE'); editable(sid,m)
+    photo=save_photo(d.get('photo'))
+    spec=d.get('specification','').strip(); category=d.get('category','').strip()
     if g.user['access_role']=='STAFF':
         rid=d.get('request_id') or uuid.uuid4().hex
         if not re.fullmatch(r'[a-zA-Z0-9-]{16,80}',rid): fail('Invalid submission reference.')
@@ -379,12 +388,12 @@ def create_item():
         if existing:
             if existing['actor']!=g.user['id']: fail('Submission reference already used.',409)
             return jsonify(ok=True,pending=True,reference=existing['id'])
-        payload=dict(type='NEW_ITEM',name=d['name'].strip(),specification=d['specification'].strip(),category=d.get('category',''),unit=d.get('unit','Nos'),qty=qty,rate=rate,photo=photo,note='',reason='',date=date.today().isoformat())
+        payload=dict(type='NEW_ITEM',name=d['name'].strip(),specification=spec,category=category,unit=d.get('unit','Nos'),qty=qty,rate=rate,photo=photo,note='',reason='',date=date.today().isoformat())
         cur=db().execute('INSERT INTO submissions(actor,section_id,payload,request_id,created,updated) VALUES(?,?,?,?,?,?)',(g.user['id'],sid,json.dumps(payload),rid,now(),now()))
         audit('NEW_ITEM_SUBMITTED',{'reference':cur.lastrowid,'payload':payload});db().commit()
         return jsonify(ok=True,pending=True,reference=cur.lastrowid)
     code='INV-'+uuid.uuid4().hex[:8].upper()
-    cur=db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,d['name'].strip(),sid,d['specification'],d.get('category',''),d.get('unit','Nos'),rate,photo,now()))
+    cur=db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,d['name'].strip(),sid,spec,category,d.get('unit','Nos'),rate,photo,now()))
     if qty and g.user['access_role']=='STAFF':
         payload=dict(item_id=cur.lastrowid,name=d['name'].strip(),type='PURCHASE',qty=qty,rate=rate,photo=None,reason='',note='New item received stock',date=date.today().isoformat())
         db().execute('INSERT INTO submissions(actor,section_id,payload,request_id,created,updated) VALUES(?,?,?,?,?,?)',(g.user['id'],sid,json.dumps(payload),uuid.uuid4().hex,now(),now()))

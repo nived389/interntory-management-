@@ -126,3 +126,15 @@ def test_monthly_dashboard_metrics(clients):
     counts_past=m.get('/api/counts?month=2026-01').json
     sec1_past=next(c for c in counts_past if c['id']==1)
     assert sec1_past['total']==0
+
+def test_create_item_without_specification_and_category(clients):
+    m,s,p=clients
+    # Create item with no specification and no category
+    res = p(m, '/items', {'name': 'Optional Field Item', 'section_id': 1, 'qty': 5, 'rate': '50', 'photo': photo()})
+    assert res.status_code == 200, res.json
+    iid = res.json['id']
+    with m.application.app_context():
+        row = mod.db().execute('SELECT specification, category FROM items WHERE id=?', (iid,)).fetchone()
+        assert row['specification'] == ''
+        assert row['category'] == ''
+

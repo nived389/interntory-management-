@@ -108,8 +108,8 @@ def register(a):
             permission='add_items' if p['type']=='NEW_ITEM' else 'purchases' if p['type']=='PURCHASE' else 'breakage' if p['type'] in ('BREAKAGE','DAMAGE') else 'adjustments'
             if not access.can(permission):a.fail('Submission permission has been removed.',403)
             if p['type']=='NEW_ITEM':
-                p['name']=str(d.get('name',p['name'])).strip();p['specification']=str(d.get('specification',p['specification'])).strip()
-                if not p['name'] or not p['specification']:a.fail('Name and specification are required.')
+                p['name']=str(d.get('name',p['name'])).strip();p['specification']=str(d.get('specification',p.get('specification',''))).strip()
+                if not p['name']:a.fail('Name is required.')
                 p['category']=str(d.get('category',p.get('category','')));p['unit']=str(d.get('unit',p.get('unit','Nos')))
             else:
                 i=a.item(d.get('item_id',p['item_id']))
