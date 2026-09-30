@@ -41,8 +41,23 @@ async function render(){if(staffMode()&&!['dashboard','counts','addstock','corre
 const empty=(text,i='box')=>`<div class="empty">${icon(i)}<br>${text}</div>`;
 async function dashboard(){if(staffMode())return staffDashboard();const [items,counts,events]=await Promise.all([can('inventory')?api('/items?property='+state.property):Promise.resolve([]),(can('counts')||can('review_counts'))?api('/counts?month='+state.month):Promise.resolve([]),(can('inventory')||can('purchases')||can('breakage')||can('reports'))?api('/events?property='+state.property+'&month='+state.month):Promise.resolve([])]);state.items=items;const cs=counts.filter(c=>!state.property||String(c.property_id)===state.property),pending=cs.filter(c=>c.total&&c.status!=='CLOSED');const br=events.filter(e=>e.type==='BREAKAGE');const purchase=events.filter(e=>['OPENING','PURCHASE'].includes(e.type));return pageHead(master()?'Inventory overview':'Your daily workspace',master()?'A little clarity for everything behind the scenes.':'Choose an action to keep your property running smoothly.',`<button data-additem class="primary">+ Add item</button>`)+`<section class="welcome"><div><div class="eyebrow">A WELL-KEPT WORKSPACE</div><h2>${master()?'Small details. Smooth operations.':'Let’s get everything accounted for.'}</h2><p>${master()?`Your ${monthLabel()} inventory is ready. Review section counts, record new purchases, and keep your team on the same page.`:'Count what you see, record stock as it arrives, and capture any damage with a photo.'}</p></div><button class="lime" data-nav="counts">${master()?'Review monthly counts':'Start a monthly count'} &nbsp; →</button></section>`+(master()?`<div class="stats">${stat('Active items',items.length,'Across '+cs.length+' sections','box')}${stat('Counts pending',pending.length,'Sections awaiting close','count')}${stat('Purchase value',rupees(purchase.reduce((a,r)=>a+r.qty*(r.rate||0),0)),purchase.length+' stock additions','report')}${stat('Breakage value',rupees(br.reduce((a,r)=>a-r.qty*(r.rate||0),0)),br.reduce((a,r)=>a-r.qty,0)+' items recorded','break')}</div>`:`<div class="actions" style="margin-bottom:24px"><button class="primary" data-move="PURCHASE">+ Add stock / purchase</button><button data-move="BREAKAGE">Report breakage</button><button data-nav="counts">Monthly count</button></div>`)+`<div class="dashboard-grid"><div><section class="panel"><div class="panel-head"><div><h2>Monthly inventory</h2><p>Section-by-section progress · ${monthLabel()}</p></div><button class="ghost small" data-nav="counts">View all →</button></div>${cs.map(c=>`<div class="section-row"><span class="section-icon">${icon('box')}</span><div class="section-title"><strong>${esc(c.name)}</strong><small>${c.completed} of ${c.total} items counted</small></div><div>${statusBadge(c.total?c.status:'EMPTY')}<div class="progress"><span style="width:${c.total?c.completed/c.total*100:0}%"></span></div></div><button class="ghost small" data-count="${c.id}" aria-label="Open ${esc(c.name)} count">→</button></div>`).join('')}</section>${master()&&items.some(i=>!i.photo)?`<div class="notice"><strong>Your catalogue is ready for its finishing touches.</strong><br>${items.filter(i=>!i.photo).length} items need reference photos. Add specifications, opening stock and rates before your first count. <button class="ghost small" data-nav="inventory">Review items →</button></div>`:''}</div><div><section class="panel"><div class="panel-head"><div><h2>Quick actions</h2><p>The everyday essentials, one click away.</p></div></div><div class="panel-body"><div class="nav"><button data-move="PURCHASE">${icon('plus')} Add stock / purchase <span class="spacer"></span>→</button><button data-move="BREAKAGE">${icon('break')} Report breakage <span class="spacer"></span>→</button><button data-nav="${master()?'reports':'counts'}">${icon('report')} ${master()?'Download a report':'Continue counting'} <span class="spacer"></span>→</button></div></div></section><section class="panel"><div class="panel-head"><div><h2>Recent activity</h2><p>${master()?'Latest stock movements':'Your recent submissions'}</p></div><span class="badge">${events.length} records</span></div>${events.length?events.slice(0,5).map(e=>`<div class="activity"><span class="dot"></span><div><strong>${esc(e.name)}</strong><p>${esc(e.type.toLowerCase())} · ${Math.abs(e.qty)} items ${master()?'· '+esc(e.staff):''}</p><small>${esc(e.date)}</small></div></div>`).join(''):empty('A fresh start.<br>Your stock activity will appear here.','audit')}</section></div></div><div class="footer-note">TRAVELLERS CAVERN × TRAVELICIOUS &nbsp; · &nbsp; EVERY ITEM HAS A PLACE.</div>`}
 function stat(label,value,foot,i){return `<div class="stat"><div class="stat-top">${label}${icon(i)}</div><div class="stat-value">${value}</div><div class="stat-foot">${foot}</div></div>`}
-async function inventory(){state.items=await api('/items?property='+state.property);return pageHead('Item catalogue','A home for every item, across every section.',`<button class="primary" data-addinventory>+ Add inventory</button>`)+`<section class="panel"><div class="toolbar"><input type="search" id="item-search" placeholder="Search item name or code…" aria-label="Search items" value="${esc(state.search)}"><select id="section-filter" aria-label="Section"><option value="">All sections</option>${sections().map(s=>`<option value="${s.id}" ${String(s.id)===state.section?'selected':''}>${esc(s.name)}</option>`).join('')}</select><span class="badge">${state.items.length} items</span></div><div id="item-table">${inventoryTable()}</div></section>`}
-function inventoryTable(){const items=state.items.filter(r=>(!state.section||String(r.section_id)===state.section)&&(!state.search||`${r.name} ${r.code}`.toLowerCase().includes(state.search.toLowerCase())));return items.length?`<div class="table-wrap"><table><thead><tr><th>Item</th><th>Section</th><th>Specification</th>${master()?'<th>Stock</th><th>Unit rate</th>':''}<th>Readiness</th><th></th></tr></thead><tbody>${items.map(r=>`<tr><td class="name">${itemCell(r)}</td><td>${esc(r.section)}</td><td>${esc(r.specification)||'<span class="badge">Needs details</span>'}</td>${master()?`<td>${qty(r.stock)} <small>${esc(r.unit)}</small></td><td>${r.rate==null?'<span class="badge amber">Rate missing</span>':rupees(r.rate)}</td>`:''}<td>${r.photo?'<span class="badge green">Photo added</span>':'<span class="badge amber">Photo needed</span>'}</td><td><button class="small ghost" data-item="${r.id}">${master()?'View item':can('purchases')?'Add stock':'View details'} →</button></td></tr>`).join('')}</tbody></table></div><div class="table-footer">Showing ${items.length} items · ${master()?'Stock is calculated from ledger and closed counts.':'Counted quantities remain private to your Master.'}</div>`:empty('No matching items. Try another section or add an item.')}
+function bulkToolbar(){
+ if(!can('edit_items'))return '';
+ const n=state.selectedItems?.size||0;
+ return `<div id="bulk-toolbar" class="bulk-toolbar" style="display:${n?'flex':'none'}"><span class="bulk-count"><strong>${n}</strong> item${n===1?'':'s'} selected</span><div class="actions"><button type="button" id="bulk-move-btn" class="primary small">📦 Move selected</button><button type="button" id="bulk-delete-btn" class="danger small">🗑 Delete selected</button><button type="button" id="bulk-clear-btn" class="ghost small">✕ Clear</button></div></div>`;
+}
+async function inventory(){
+ state.items=await api('/items?property='+state.property);
+ if(!state.selectedItems)state.selectedItems=new Set();
+ return pageHead('Item catalogue','A home for every item, across every section.',`<button class="primary" data-addinventory>+ Add inventory</button>`)+`<section class="panel"><div class="toolbar"><input type="search" id="item-search" placeholder="Search item name or code…" aria-label="Search items" value="${esc(state.search)}"><select id="section-filter" aria-label="Section"><option value="">All sections</option>${sections().map(s=>`<option value="${s.id}" ${String(s.id)===state.section?'selected':''}>${esc(s.name)}</option>`).join('')}</select><span class="badge">${state.items.length} items</span></div>${bulkToolbar()}<div id="item-table">${inventoryTable()}</div></section>`
+}
+function inventoryTable(){
+ const canEdit=can('edit_items');
+ if(!state.selectedItems)state.selectedItems=new Set();
+ const items=state.items.filter(r=>(!state.section||String(r.section_id)===state.section)&&(!state.search||`${r.name} ${r.code}`.toLowerCase().includes(state.search.toLowerCase())));
+ const allSelected=items.length>0&&items.every(r=>state.selectedItems.has(r.id));
+ return items.length?`<div class="table-wrap"><table><thead><tr>${canEdit?`<th style="width:40px;text-align:center"><input type="checkbox" id="select-all-items" ${allSelected?'checked':''} aria-label="Select all visible items"></th>`:''}<th>Item</th><th>Section</th><th>Specification</th>${master()?'<th>Stock</th><th>Unit rate</th>':''}<th>Readiness</th><th></th></tr></thead><tbody>${items.map(r=>{const isSel=state.selectedItems.has(r.id);return `<tr class="${isSel?'selected':''}" data-item-row="${r.id}">${canEdit?`<td style="text-align:center"><input type="checkbox" data-select-item="${r.id}" ${isSel?'checked':''} aria-label="Select ${esc(r.name)}"></td>`:''}<td class="name">${itemCell(r)}</td><td>${esc(r.section)}</td><td>${esc(r.specification)||'<span class="badge">Needs details</span>'}</td>${master()?`<td>${qty(r.stock)} <small>${esc(r.unit)}</small></td><td>${r.rate==null?'<span class="badge amber">Rate missing</span>':rupees(r.rate)}</td>`:''}<td>${r.photo?'<span class="badge green">Photo added</span>':'<span class="badge amber">Photo needed</span>'}</td><td><button class="small ghost" data-item="${r.id}">${master()?'View item':can('purchases')?'Add stock':'View details'} →</button></td></tr>`}).join('')}</tbody></table></div><div class="table-footer">Showing ${items.length} items · ${master()?'Stock is calculated from ledger and closed counts.':'Counted quantities remain private to your Master.'}</div>`:empty('No matching items. Try another section or add an item.')
+}
 async function countsPage(){if(state.countSection)return countView();state.context=await api('/context');state.month=state.context.today.slice(0,7);if($('#staff-count-month'))$('#staff-count-month').textContent=monthLabel()+' · automatic';if($('#workspace-month'))$('#workspace-month').textContent=monthLabel()+' · automatic';const cc=(await api('/counts?month='+state.month)).filter(c=>!state.property||String(c.property_id)===state.property);return pageHead('Monthly inventory','Count each item, review your entries, then submit the section.')+`<div class="notice"><strong>${master()?'A clear close, a reliable start.':'Blind counting is on.'}</strong> ${master()?'Once closed, actual quantities become the next period’s opening stock. Submitted sections are locked until reopened.':'Enter the quantities you physically see. Expected stock and differences are only available to authorized reviewers.'}</div><div class="section-cards">${cc.map(c=>`<section class="section-card"><div class="row"><span class="section-icon">${icon('count')}</span><span class="spacer"></span>${statusBadge(c.status)}</div><h3>${esc(c.name)}</h3><p>${state.context.properties.find(p=>p.id===c.property_id)?.name} · ${c.total} items</p><div class="progress"><span style="width:${c.total?100*c.completed/c.total:0}%"></span></div><div class="row"><span class="help">${c.completed} of ${c.total} counted</span><span class="spacer"></span><button data-count="${c.id}" class="small primary">${c.status==='CLOSED'?'View count':'Open count'} →</button></div></section>`).join('')}</div>`}
 function drafts(){try{return JSON.parse(localStorage.getItem('count-drafts-'+state.user.id)||'{}')}catch{return {}}}
 function writeDraft(k,v){const d=drafts();if(v===null)delete d[k];else d[k]=v;localStorage.setItem('count-drafts-'+state.user.id,JSON.stringify(d))}
@@ -109,9 +124,87 @@ function bindPage(){
  if($('#audit-prev'))$('#audit-prev').onclick=()=>{state.auditOffset=Math.max(0,state.auditOffset-100);render()};if($('#audit-next'))$('#audit-next').onclick=()=>{state.auditOffset+=100;render()};
  if($('#import-workbook'))$('#import-workbook').onclick=importForm;
 }
+function updateBulkUI(){
+ const n=state.selectedItems?.size||0;
+ const tb=$('#bulk-toolbar');
+ if(tb){
+  tb.style.display=n?'flex':'none';
+  const label=$('.bulk-count',tb);
+  if(label)label.innerHTML=`<strong>${n}</strong> item${n===1?'':'s'} selected`;
+ }
+ const visible=state.items.filter(r=>(!state.section||String(r.section_id)===state.section)&&(!state.search||`${r.name} ${r.code}`.toLowerCase().includes(state.search.toLowerCase())));
+ const allCb=$('#select-all-items');
+ if(allCb)allCb.checked=visible.length>0&&visible.every(r=>state.selectedItems?.has(r.id));
+ $$('[data-select-item]').forEach(cb=>{
+  const isChecked=!!state.selectedItems?.has(Number(cb.dataset.selectItem));
+  cb.checked=isChecked;
+  const row=cb.closest('tr');
+  if(row)row.classList.toggle('selected',isChecked);
+ });
+}
+function bindBulkSelection(){
+ if(!can('edit_items'))return;
+ if($('#select-all-items'))$('#select-all-items').onchange=e=>{
+  const visible=state.items.filter(r=>(!state.section||String(r.section_id)===state.section)&&(!state.search||`${r.name} ${r.code}`.toLowerCase().includes(state.search.toLowerCase())));
+  if(e.target.checked)visible.forEach(r=>state.selectedItems.add(r.id));
+  else visible.forEach(r=>state.selectedItems.delete(r.id));
+  updateBulkUI();
+ };
+ $$('[data-select-item]').forEach(cb=>{
+  cb.onchange=()=>{
+   const id=Number(cb.dataset.selectItem);
+   if(cb.checked)state.selectedItems.add(id);
+   else state.selectedItems.delete(id);
+   updateBulkUI();
+  };
+ });
+ if($('#bulk-clear-btn'))$('#bulk-clear-btn').onclick=()=>{
+  state.selectedItems.clear();
+  updateBulkUI();
+ };
+ if($('#bulk-move-btn'))$('#bulk-move-btn').onclick=()=>{
+  const ids=Array.from(state.selectedItems||[]);
+  if(!ids.length)return toast('Select at least one item.');
+  const selected=state.items.filter(i=>ids.includes(i.id));
+  const secChoices=sections().map(s=>[s.id,(state.context.properties.find(p=>p.id===s.property_id)?.name||'')+' / '+s.name]);
+  const previewList=`<div class="bulk-preview-list">${selected.slice(0,10).map(i=>`<div class="bulk-preview-item">${thumb(i)}<div><strong>${esc(i.name)}</strong><small>${esc(i.section)} · Stock: ${qty(i.stock)} ${esc(i.unit)}</small></div></div>`).join('')}${selected.length>10?`<p style="text-align:center;font-size:11px;color:var(--muted);margin:6px 0">+ ${selected.length-10} more item(s)</p>`:''}</div>`;
+  showModal(`Move ${ids.length} item(s)`,
+   `<p class="help">Move ${ids.length} selected item(s) to another section. All current stock balances will be transferred with an audit adjustment record.</p>${selectField('Target section *','section_id',secChoices)}${previewList}`,
+   async d=>{
+    const targetId=Number(d.section_id);
+    const res=await api('/items/bulk-move','POST',{item_ids:ids,section_id:targetId});
+    toast(`${res.moved} item(s) moved to ${res.target_section}`);
+    state.selectedItems.clear();
+    state.items=await api('/items?property='+state.property);
+    $('#item-table').innerHTML=inventoryTable();
+    bindItems();
+    updateBulkUI();
+   }
+  );
+ };
+ if($('#bulk-delete-btn'))$('#bulk-delete-btn').onclick=()=>{
+  const ids=Array.from(state.selectedItems||[]);
+  if(!ids.length)return toast('Select at least one item.');
+  const selected=state.items.filter(i=>ids.includes(i.id));
+  const previewList=`<div class="bulk-preview-list">${selected.slice(0,10).map(i=>`<div class="bulk-preview-item">${thumb(i)}<div><strong>${esc(i.name)}</strong><small>${esc(i.section)} · Stock: ${qty(i.stock)} ${esc(i.unit)}</small></div></div>`).join('')}${selected.length>10?`<p style="text-align:center;font-size:11px;color:var(--muted);margin:6px 0">+ ${selected.length-10} more item(s)</p>`:''}</div>`;
+  showModal(`Delete ${ids.length} item(s)?`,
+   `<div class="notice" style="border-color:#eac4b8;background:#fff5f2;color:#9b442b"><strong>Are you sure?</strong><br>Selected items will be removed from your active catalogue and monthly counts. Items with transaction history will be safely archived to preserve ledger audit integrity.</div>${previewList}`,
+   async()=>{
+    const res=await api('/items/bulk-delete','POST',{item_ids:ids});
+    toast(`${res.deleted} item(s) deleted`);
+    state.selectedItems.clear();
+    state.items=await api('/items?property='+state.property);
+    $('#item-table').innerHTML=inventoryTable();
+    bindItems();
+    updateBulkUI();
+   }
+  );
+ };
+}
 function bindItems(){
  $$('[data-item]').forEach(b=>b.onclick=()=>{const r=state.items.find(i=>i.id===Number(b.dataset.item));master()?itemDetail(r):can('purchases')?movementForm('PURCHASE',r.id):showModal(esc(r.name),`<div class="row">${thumb(r)}<p>${esc(r.specification||'No specifications recorded.')}</p></div>`)});
  $$('[data-photo]').forEach(b=>b.onclick=()=>showModal('Incident photo',`<img class="preview-full" src="/photo/${esc(b.dataset.photo)}" alt="Recorded incident evidence">`));
+ bindBulkSelection();
 }
 function uploadField(required=true){return `<div class="field full"><label for="camera-input">${required?'Photo *':'Update photo'}</label><div class="row"><button type="button" id="camera-button" class="primary">Take photo</button><input id="camera-input" type="file" accept="image/*" capture="environment" hidden></div><small>Photo is automatically resized to fit 1600px and compressed below 1 MB before upload. Review the preview before saving.</small><img id="photo-preview" class="upload-preview" alt="Photo preview"></div>`}
 function photoBinding(onReady=()=>{}){

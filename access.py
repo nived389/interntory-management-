@@ -44,6 +44,7 @@ def public_user(u):
 def policy(endpoint,method,data):
     """Permission alternatives; a tuple means any one suffices. None is authentication only."""
     fixed={'items':('inventory',),'create_item':('add_items',),'edit_item':('edit_items',),
+           'move_item':('edit_items',),'bulk_move_items':('edit_items',),'bulk_delete_items':('edit_items',),
            'history':('view_totals',),'counts':('counts','review_counts'),'count_detail':('counts','review_counts'),
            'events':('inventory','breakage','purchases','reports'),'reports':('reports',),'export':('reports',),
            'archives':('reports',),'archive_file':('reports',),'users':('users',),'user_write':('users',),

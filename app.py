@@ -94,7 +94,10 @@ def init():
     if os.environ.get('DATABASE_URL') or os.environ.get('TURSO_DATABASE_URL'):
         with app.app_context():
             if not one('SELECT id FROM users LIMIT 1'): raise RuntimeError('Migrate existing data before starting cloud mode')
-            if os.environ.get('TURSO_DATABASE_URL'): db().execute('SELECT path FROM stored_files LIMIT 1')
+            if os.environ.get('TURSO_DATABASE_URL'):
+                db().execute('SELECT path FROM stored_files LIMIT 1')
+                ready=one("SELECT value FROM settings WHERE key='turso_migration_ready'")
+                if ready and ready['value']!='true': raise RuntimeError('Turso migration is not complete')
         return
     with app.app_context():
         db().executescript((ROOT/'schema.sql').read_text())
@@ -155,18 +158,22 @@ def report(sid,m):
     if prev: previous={r['id']:r for r in json.loads(one('SELECT data FROM snapshots WHERE count_id=? ORDER BY version DESC LIMIT 1',(prev['id'],))['data'])}
     allitems=rows('SELECT * FROM items WHERE section_id=? AND (active=1 OR id IN (SELECT item_id FROM movements WHERE section_id=? AND substr(date,1,7)=?)) AND substr(created,1,7)<=? ORDER BY name COLLATE NOCASE',(sid,sid,m,m))
     result=[]
+    prior_by_item={r['item_id']:r['qty'] for r in rows('SELECT item_id,COALESCE(sum(qty),0) qty FROM movements WHERE section_id=? AND substr(date,1,7)<? AND substr(date,1,7)>? GROUP BY item_id',(sid,m,prev['month'] if prev else '0000-00'))}
+    month_moves={}
+    for movement in rows('SELECT * FROM movements WHERE section_id=? AND substr(date,1,7)=?',(sid,m)): month_moves.setdefault(movement['item_id'],[]).append(movement)
+    count_lines={r['item_id']:r for r in rows('SELECT l.*,u.username FROM lines l LEFT JOIN users u ON u.id=l.actor WHERE l.count_id=?',(c['id'],))} if c else {}
     for i in allitems:
         opening=previous.get(i['id'],{}).get('actual',0) or 0
-        prior=one('SELECT COALESCE(sum(qty),0) qty FROM movements WHERE item_id=? AND substr(date,1,7)<? AND substr(date,1,7)>?',(i['id'],m,prev['month'] if prev else '0000-00'))['qty']
+        prior=prior_by_item.get(i['id'],0)
         opening+=prior
-        moves=rows('SELECT * FROM movements WHERE item_id=? AND substr(date,1,7)=?',(i['id'],m))
+        moves=month_moves.get(i['id'],[])
         added=sum(x['qty'] for x in moves if x['type'] in ('OPENING','PURCHASE'))
         damage=-sum(x['qty'] for x in moves if x['type'] in ('BREAKAGE','DAMAGE'))
         adjustment=sum(x['qty'] for x in moves if x['type']=='ADJUSTMENT')
         expected=opening+added-damage+adjustment
-        line=one('SELECT * FROM lines WHERE count_id=? AND item_id=?',(c['id'],i['id'])) if c else None
+        line=count_lines.get(i['id'])
         actual=line['actual'] if line else None
-        result.append(dict(i,submitted_by=one('SELECT username FROM users WHERE id=?',(line['actor'],))['username'] if line and line.get('actor') else '',review_note=line.get('review_note','') if line else '',needs_correction=line.get('needs_correction',0) if line else 0,previous=opening,added=added,damage=damage,adjustment=adjustment,expected=expected,actual=actual,difference=actual-expected if actual is not None else None,note=line['note'] if line else '',flag=line['flag'] if line else '',purchase_value=sum(x['qty']*x['rate'] for x in moves if x['type'] in ('OPENING','PURCHASE') and x['rate'] is not None),breakage_qty=-sum(x['qty'] for x in moves if x['type']=='BREAKAGE'),breakage_value=sum(-x['qty']*x['rate'] for x in moves if x['type']=='BREAKAGE' and x['rate'] is not None),missing_rates=sum(x['rate'] is None for x in moves)))
+        result.append(dict(i,submitted_by=(line.get('username') or '') if line else '',review_note=line.get('review_note','') if line else '',needs_correction=line.get('needs_correction',0) if line else 0,previous=opening,added=added,damage=damage,adjustment=adjustment,expected=expected,actual=actual,difference=actual-expected if actual is not None else None,note=line['note'] if line else '',flag=line['flag'] if line else '',purchase_value=sum(x['qty']*x['rate'] for x in moves if x['type'] in ('OPENING','PURCHASE') and x['rate'] is not None),breakage_qty=-sum(x['qty'] for x in moves if x['type']=='BREAKAGE'),breakage_value=sum(-x['qty']*x['rate'] for x in moves if x['type']=='BREAKAGE' and x['rate'] is not None),missing_rates=sum(x['rate'] is None for x in moves)))
     return result
 
 def save_photo(encoded):
@@ -302,6 +309,63 @@ def move_item(iid):
     db().execute("DELETE FROM lines WHERE item_id=? AND count_id IN (SELECT id FROM counts WHERE month=? AND status='OPEN')",(iid,m))
     audit('ITEM_SECTION_MOVED',{'from_item':iid,'to_item':new_id,'from_section':old['section_id'],'to_section':sid,'quantity':stock})
     db().commit(); return jsonify(ok=True,id=new_id,quantity=stock)
+
+@app.post('/api/items/bulk-move')
+@need()
+def bulk_move_items():
+    if g.user.get('access_role') not in ('MASTER','ADMIN') or not access.can('edit_items'): fail('Only authorized admins can move items.',403)
+    d=request.json or {}; item_ids=[number(x,1) for x in d.get('item_ids',[])]
+    if not item_ids: fail('Select at least one item to move.')
+    target=section(number(d.get('section_id'),1)); sid=target['id']; m=date.today().isoformat()[:7]
+    editable(sid,m)
+    queued=rows("SELECT payload FROM submissions WHERE status IN ('PENDING','RETURNED')")
+    pending_ids={json.loads(r['payload']).get('item_id') for r in queued}
+    conflicts=[iid for iid in item_ids if iid in pending_ids]
+    if conflicts: fail(f'Review outstanding reports before moving items ({len(conflicts)} items pending review).',409)
+    db().execute('BEGIN IMMEDIATE'); moved_count=0
+    for iid in item_ids:
+        old=one('SELECT i.*, s.name section FROM items i JOIN sections s ON s.id=i.section_id WHERE i.id=? AND i.active=1',(iid,))
+        if not old or old['section_id']==sid: continue
+        editable(old['section_id'],m)
+        stock_list=[r['expected'] for r in report(old['section_id'],m) if r['id']==iid]
+        stock=stock_list[0] if stock_list else 0
+        if stock<0: db().execute('ROLLBACK'); fail(f"Resolve negative stock on '{old['name']}' before moving.",400)
+        code=old['code']+'-M'+uuid.uuid4().hex[:8].upper()
+        cur=db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,old['name'],sid,old['specification'],old['category'],old['unit'],old['rate'],old['photo'],now()))
+        new_id=cur.lastrowid
+        for item_id,section_id,quantity in ((iid,old['section_id'],-stock),(new_id,sid,stock)):
+            if quantity!=0:
+                db().execute('INSERT INTO movements(item_id,section_id,type,qty,rate,name,note,date,actor,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)',(item_id,section_id,'ADJUSTMENT',quantity,old['rate'],old['name'],f"Section transfer: {old['section']} to {target['name']} (items {iid} / {new_id})",date.today().isoformat(),g.user['id'],str(uuid.uuid4())))
+        db().execute('UPDATE items SET active=0 WHERE id=?',(iid,))
+        db().execute("DELETE FROM lines WHERE item_id=? AND count_id IN (SELECT id FROM counts WHERE month=? AND status='OPEN')",(iid,m))
+        audit('ITEM_SECTION_MOVED',{'from_item':iid,'to_item':new_id,'from_section':old['section_id'],'to_section':sid,'quantity':stock})
+        moved_count+=1
+    db().commit(); return jsonify(ok=True,moved=moved_count,target_section=target['name'])
+
+@app.post('/api/items/bulk-delete')
+@need()
+def bulk_delete_items():
+    if g.user.get('access_role') not in ('MASTER','ADMIN') or not access.can('edit_items'): fail('Only authorized admins can delete items.',403)
+    d=request.json or {}; item_ids=[number(x,1) for x in d.get('item_ids',[])]
+    if not item_ids: fail('Select at least one item to delete.')
+    m=date.today().isoformat()[:7]
+    queued=rows("SELECT payload FROM submissions WHERE status IN ('PENDING','RETURNED')")
+    pending_ids={json.loads(r['payload']).get('item_id') for r in queued}
+    conflicts=[iid for iid in item_ids if iid in pending_ids]
+    if conflicts: fail(f'Review outstanding reports before deleting items ({len(conflicts)} items pending review).',409)
+    db().execute('BEGIN IMMEDIATE'); deleted_count=0
+    for iid in item_ids:
+        old=one('SELECT * FROM items WHERE id=? AND active=1',(iid,))
+        if not old: continue
+        editable(old['section_id'],m)
+        db().execute("DELETE FROM lines WHERE item_id=? AND count_id IN (SELECT id FROM counts WHERE month=? AND status='OPEN')",(iid,m))
+        has_refs=one('SELECT 1 FROM movements WHERE item_id=? UNION ALL SELECT 1 FROM lines WHERE item_id=?',(iid,iid))
+        if has_refs: db().execute('UPDATE items SET active=0 WHERE id=?',(iid,))
+        else: db().execute('DELETE FROM items WHERE id=?',(iid,))
+        deleted_count+=1
+    audit('ITEMS_BULK_DELETED',{'item_ids':item_ids,'count':deleted_count})
+    db().commit(); return jsonify(ok=True,deleted=deleted_count)
+
 
 @app.get('/photo/<name>')
 @need()

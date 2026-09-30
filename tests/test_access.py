@@ -116,3 +116,27 @@ def test_admin_section_transfer(clients):
     assert moved['name']==original['name']
     assert m.get(f'/api/history/{iid}').status_code==200
     assert p(m,f'/items/{iid}/move',{'section_id':4}).status_code==404
+
+def test_bulk_move_and_delete(clients):
+    m,s,p=clients
+    i1=new_item(m,p,section=2)
+    i2=new_item(m,p,section=2)
+    # Staff cannot bulk move or bulk delete
+    assert p(s,'/items/bulk-move',{'item_ids':[i1,i2],'section_id':3}).status_code==403
+    assert p(s,'/items/bulk-delete',{'item_ids':[i1,i2]}).status_code==403
+    # Master bulk moves to section 3
+    res_move=p(m,'/items/bulk-move',{'item_ids':[i1,i2],'section_id':3})
+    assert res_move.status_code==200,res_move.json
+    assert res_move.json['moved']==2
+    items=m.get('/api/items').json
+    assert not any(i['id'] in (i1,i2) for i in items)
+    moved_items=[i for i in items if i['id'] not in (i1,i2) and i['section_id']==3 and i['name']=='Test mug']
+    assert len(moved_items)>=2
+    # Master bulk deletes the moved items
+    res_del=p(m,'/items/bulk-delete',{'item_ids':[i['id'] for i in moved_items]})
+    assert res_del.status_code==200,res_del.json
+    assert res_del.json['deleted']==len(moved_items)
+    items_after=m.get('/api/items').json
+    assert not any(i['id'] in [x['id'] for x in moved_items] for i in items_after)
+
+
