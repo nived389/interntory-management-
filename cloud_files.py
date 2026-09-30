@@ -16,6 +16,11 @@ def call(method,path,**kwargs):
     return response
 
 def upload(root,relative):
+    if os.environ.get('TURSO_DATABASE_URL'):
+        from app import db
+        from turso_files import put
+        put(db(),relative,(Path(root)/relative).read_bytes())
+        return
     if not enabled(): return
     _,_,bucket=config()
     mime='image/webp' if relative.endswith('.webp') else 'application/octet-stream'
@@ -23,6 +28,17 @@ def upload(root,relative):
 
 def local(root,relative):
     path=Path(root)/relative
+    if os.environ.get('TURSO_DATABASE_URL'):
+        from app import db
+        from turso_files import get
+        # Fetch source of truth even when a previous failed write left a local file.
+        content=get(db(),relative)
+        path.parent.mkdir(parents=True,exist_ok=True)
+        import tempfile
+        with tempfile.NamedTemporaryFile(dir=path.parent,delete=False) as f:
+            f.write(content); temp=Path(f.name)
+        temp.replace(path)
+        return path
     if enabled() and not path.exists():
         _,_,bucket=config()
         payload=call('GET','object/authenticated/'+quote(bucket,safe='')+'/'+quote(relative,safe='/')).content

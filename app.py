@@ -13,6 +13,16 @@ import cloud_files
 ROOT=Path(__file__).parent
 DATA=Path(os.environ.get('INVENTORY_DATA', ROOT/'data')); DATA.mkdir(exist_ok=True,parents=True)
 for folder in ('photos','reports'): (DATA/folder).mkdir(exist_ok=True)
+if not os.environ.get('TURSO_DATABASE_URL') and os.environ.get('INVENTORY_SKIP_OWNER_SEED') != '1':
+    _conn_file = DATA / 'turso-connection.json'
+    if _conn_file.is_file():
+        try:
+            _t_cfg = json.loads(_conn_file.read_text())
+            if _t_cfg.get('TURSO_DATABASE_URL') and _t_cfg.get('TURSO_AUTH_TOKEN'):
+                os.environ['TURSO_DATABASE_URL'] = _t_cfg['TURSO_DATABASE_URL']
+                os.environ['TURSO_AUTH_TOKEN'] = _t_cfg['TURSO_AUTH_TOKEN']
+        except Exception:
+            pass
 secret=DATA/'session.key'
 if not os.environ.get('SESSION_SECRET') and not secret.exists(): secret.write_text(secrets.token_hex(32)); secret.chmod(0o600)
 app=Flask(__name__,static_folder='static')

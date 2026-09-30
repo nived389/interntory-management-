@@ -1,0 +1,2 @@
+-r requirements-production.txt
+libsql==0.1.11
