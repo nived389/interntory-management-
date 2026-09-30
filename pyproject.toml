@@ -1,0 +1,9 @@
+[project]
+name = "travelicious-inventory"
+version = "1.0.0"
+description = "Inventory management application"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.vercel]
+entrypoint = "app:app"

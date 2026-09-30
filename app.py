@@ -39,6 +39,7 @@ if not os.environ.get('SESSION_SECRET') and not secret.exists():
         pass
 
 app=Flask(__name__,static_folder='static')
+application = app
 _session_secret = os.environ.get('SESSION_SECRET') or (secret.read_text() if secret.exists() else 'inventory-fallback-secret-key-32b')
 app.config.update(SECRET_KEY=_session_secret,MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1' or bool(os.environ.get('VERCEL')),PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
 failures={}
@@ -191,6 +192,21 @@ def init():
                 sid=3 if sec=='Cafe' else 2
                 for i,n in enumerate(names,1): db().execute('INSERT INTO items(code,name,section_id,created) VALUES(?,?,?,?)',(f'TVL-{sec[:3].upper()}-{i:04}',n,sid,now()))
             db().commit()
+
+_initialized = False
+def ensure_init():
+    global _initialized
+    if not _initialized:
+        _initialized = True
+        try:
+            init()
+        except Exception as exc:
+            _initialized = False
+            app.logger.warning(f"Database initialization deferred: {exc}")
+
+@app.before_request
+def check_init():
+    ensure_init()
 
 def review_admin():
     return access.owner()
@@ -826,7 +842,10 @@ def backup():
                 for f in (DATA/folder).glob('*'): z.write(f,str(f.relative_to(DATA)))
     buffer.seek(0); return send_file(buffer,as_attachment=True,download_name=f'inventory-backup-{date.today()}.zip')
 
-init()
+try:
+    ensure_init()
+except Exception:
+    pass
 import sys
 from importer import register
 register(sys.modules[__name__])
