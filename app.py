@@ -341,7 +341,7 @@ def login():
     attempts=failures.get(key,[]); attempts=[t for t in attempts if time.time()-t<300]
     if len(attempts)>=5: fail('Too many attempts. Try again in five minutes.',429)
     u=one('SELECT * FROM users WHERE LOWER(username)=? AND active=1',(ident,))
-    if not u or u['login_provider']!='password' or not check_password_hash(u['password'],d.get('password','')):
+    if not u or u['login_provider']!='password' or not check_password_hash(u['password'],d.get('password') or ''):
         failures[key]=attempts+[time.time()]; fail('Email/username or password is incorrect.',401)
     failures.pop(key,None); session.clear(); session['uid']=u['id']; session['auth_version']=u['auth_version']; session['csrf']=secrets.token_hex(24); session.permanent=True
     g.user=u; audit('LOGIN',{'username':u['username']}); db().commit()
