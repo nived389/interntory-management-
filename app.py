@@ -22,7 +22,11 @@ REASONS=['Accidental drop / handling','Staff handling damage','Guest-related dam
 def now(): return datetime.now().isoformat(timespec='seconds')
 def db():
     if 'db' not in g:
-        if os.environ.get('DATABASE_URL'):
+        if os.environ.get('TURSO_DATABASE_URL'):
+            if os.environ.get('DATABASE_URL'): raise RuntimeError('Configure only one cloud database provider')
+            from turso_database import Database
+            g.db=Database(os.environ['TURSO_DATABASE_URL'],os.environ.get('TURSO_AUTH_TOKEN',''))
+        elif os.environ.get('DATABASE_URL'):
             from cloud_database import Database
             g.db=Database(os.environ['DATABASE_URL'])
         else:
@@ -87,9 +91,10 @@ def headers(r):
     return r
 
 def init():
-    if os.environ.get('DATABASE_URL'):
+    if os.environ.get('DATABASE_URL') or os.environ.get('TURSO_DATABASE_URL'):
         with app.app_context():
             if not one('SELECT id FROM users LIMIT 1'): raise RuntimeError('Migrate existing data before starting cloud mode')
+            if os.environ.get('TURSO_DATABASE_URL'): db().execute('SELECT path FROM stored_files LIMIT 1')
         return
     with app.app_context():
         db().executescript((ROOT/'schema.sql').read_text())
@@ -236,7 +241,7 @@ def items():
 def item_options():
     purpose=request.args.get('purpose')
     if purpose not in ('purchases','breakage','counts') or not access.can(purpose): fail('This form is not available.',403)
-    candidates=rows('SELECT i.id,i.name,i.section_id,s.name section,s.property_id FROM items i JOIN sections s ON s.id=i.section_id WHERE i.active=1 AND s.active=1 ORDER BY i.name')
+    candidates=rows('SELECT i.id,i.name,i.code,i.specification,i.photo,i.unit,i.section_id,s.name section,s.property_id FROM items i JOIN sections s ON s.id=i.section_id WHERE i.active=1 AND s.active=1 ORDER BY i.name')
     return jsonify([r for r in candidates if access.allows(r['section_id']) and (not request.args.get('property') or str(r['property_id'])==request.args['property'])])
 
 @app.post('/api/items')
@@ -653,6 +658,11 @@ def backup():
                 for relative in cloud_files.objects(folder): z.write(cloud_files.local(DATA,relative),relative)
         buffer.seek(0)
         return send_file(buffer,as_attachment=True,download_name=f'inventory-cloud-backup-{date.today()}.zip')
+    if os.environ.get('TURSO_DATABASE_URL'):
+        from turso_backup import archive
+        archive(db(),buffer)
+        buffer.seek(0)
+        return send_file(buffer,as_attachment=True,download_name=f'inventory-turso-backup-{date.today()}.zip')
     with tempfile.TemporaryDirectory() as tmp:
         dest=sqlite3.connect(Path(tmp)/'inventory.db'); db().backup(dest); dest.close()
         with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as z:
