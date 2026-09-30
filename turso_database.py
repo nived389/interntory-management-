@@ -14,11 +14,17 @@ class Result:
 
 class Database:
     def __init__(self,url,token='',local_test=False):
-        import libsql
         if not local_test and not url.startswith('libsql://'):
             raise RuntimeError('Use a Turso libSQL database URL (libsql://)')
         if not local_test and not token:raise RuntimeError('TURSO_AUTH_TOKEN is required')
-        self.connection=libsql.connect(url,auth_token=token)
+        try:
+            import libsql
+            self.connection=libsql.connect(url,auth_token=token)
+        except ImportError:
+            if local_test:
+                self.connection=sqlite3.connect(url)
+            else:
+                raise
         self.connection.execute('PRAGMA foreign_keys=ON')
     def execute(self,sql,args=()):
         try:return Result(self.connection.execute(sql,args))
