@@ -37,4 +37,20 @@ dialog[open]{display:flex;flex-direction:column;overflow:hidden}.modal-head{flex
 .bulk-preview-item .thumb{width:32px;height:32px;border-radius:6px}
 tr.selected td{background:#f3f7ee}
 
+.dashboard-month-bar{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 20px;margin-bottom:22px;gap:16px;flex-wrap:wrap}
+.month-indicator{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.month-indicator .month-title{font-size:16px;font-weight:600;color:var(--ink)}
+.month-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.month-select-label{margin:0;font-size:12px;color:var(--muted);font-weight:500}
+.month-nav-group{display:flex;align-items:center;gap:6px}
+.month-nav-group input[type=month]{padding:6px 10px;min-height:36px;font-size:12px;width:auto}
+.month-nav-group button{padding:6px 10px;min-height:36px}
+.stat.clickable{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+.stat.clickable:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(23,63,53,0.08)}
+@media(max-width:740px){
+  .dashboard-month-bar{flex-direction:column;align-items:flex-start;gap:12px;padding:14px 16px}
+  .month-controls{width:100%;justify-content:space-between}
+  .month-nav-group{width:100%;justify-content:space-between}
+}
+
 

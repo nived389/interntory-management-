@@ -4,7 +4,7 @@ A working inventory management application for **Travelicious** and **Travellers
 
 ### 🌐 Live Public Demo Link
 Access the live running instance from any device:
-* **Public URL**: [https://trials-yarn-comment-commitments.trycloudflare.com](https://trials-yarn-comment-commitments.trycloudflare.com)
+* **Public URL**: [https://sur-senate-preliminary-permits.trycloudflare.com](https://sur-senate-preliminary-permits.trycloudflare.com)
 * **Master Login**: `traveliciousrestaurant@gmail.com` | Password: `Travelicious@2026!`
 * **Staff Login**: `riya` | Password: `riya@123`
 

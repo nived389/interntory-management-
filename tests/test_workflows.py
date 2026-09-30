@@ -112,3 +112,17 @@ def test_password_reset_revokes_sessions_and_login_lockout(clients):
     s.csrf=s.get('/api/session').json['csrf']
     for _ in range(5): assert p(s,'/login',{'username':'unknown-account','password':'bad'}).status_code==401
     assert p(s,'/login',{'username':'unknown-account','password':'bad'}).status_code==429
+
+def test_monthly_dashboard_metrics(clients):
+    m,s,p=clients; i=new_item(m,p)
+    cur_month=mod.date.today().isoformat()[:7]
+    events_now=m.get(f'/api/events?month={cur_month}').json
+    assert any(e['item_id']==i and e['type']=='OPENING' for e in events_now)
+    events_past=m.get('/api/events?month=2026-01').json
+    assert not any(e['item_id']==i for e in events_past)
+    counts_now=m.get(f'/api/counts?month={cur_month}').json
+    sec1=next(c for c in counts_now if c['id']==1)
+    assert sec1['total']>=1
+    counts_past=m.get('/api/counts?month=2026-01').json
+    sec1_past=next(c for c in counts_past if c['id']==1)
+    assert sec1_past['total']==0
