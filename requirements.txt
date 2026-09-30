@@ -30,3 +30,4 @@ urllib3==2.6.3
 Werkzeug==3.1.9
 zipp==3.23.1
 libsql==0.1.11
+gunicorn==23.0.0

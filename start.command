@@ -7,4 +7,7 @@ if [[ ! -x .venv-modern/bin/python ]]; then
   .venv-modern/bin/pip install -r requirements.txt || exit 1
 fi
 open http://127.0.0.1:5055
+if [[ -f data/turso-connection.json ]]; then
+  exec .venv-modern/bin/python run_connected.py
+fi
 exec .venv-modern/bin/python app.py

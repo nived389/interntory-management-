@@ -11,7 +11,8 @@ import credential_vault
 import cloud_files
 
 ROOT=Path(__file__).parent
-_default_data = Path('/tmp/inventory_data') if os.environ.get('VERCEL') else ROOT/'data'
+_is_cloud_platform = bool(os.environ.get('VERCEL') or os.environ.get('RENDER'))
+_default_data = Path('/tmp/inventory_data') if _is_cloud_platform else ROOT/'data'
 DATA=Path(os.environ.get('INVENTORY_DATA', _default_data))
 try:
     DATA.mkdir(exist_ok=True,parents=True)
@@ -40,8 +41,13 @@ if not os.environ.get('SESSION_SECRET') and not secret.exists():
 
 app=Flask(__name__,static_folder='static')
 application = app
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+except Exception:
+    pass
 _session_secret = os.environ.get('SESSION_SECRET') or (secret.read_text() if secret.exists() else 'inventory-fallback-secret-key-32b')
-app.config.update(SECRET_KEY=_session_secret,MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1' or bool(os.environ.get('VERCEL')),PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
+app.config.update(SECRET_KEY=_session_secret,MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1' or _is_cloud_platform,PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
 failures={}
 REASONS=['Accidental drop / handling','Staff handling damage','Guest-related damage','Wear and tear','Kitchen / service operation','Missing / unable to locate','Unknown','Other']
 def now(): return datetime.now().isoformat(timespec='seconds')
@@ -290,6 +296,9 @@ def save_photo(encoded):
         cloud_files.upload(DATA,'photos/thumb-'+name)
         return name
     except (ValueError,UnidentifiedImageError,OSError): fail('This image could not be read. Choose another photo.')
+
+@app.get('/healthz')
+def health(): return jsonify(ok=True)
 
 @app.get('/')
 def index(): return app.send_static_file('index.html')
