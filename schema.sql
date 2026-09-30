@@ -24,3 +24,10 @@ CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY,recipient_id INT
 CREATE INDEX IF NOT EXISTS notification_inbox ON notifications(recipient_id,read_at,id);
 
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY,actor INTEGER NOT NULL REFERENCES users(id),section_id INTEGER NOT NULL REFERENCES sections(id),payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',feedback TEXT NOT NULL DEFAULT '',revision INTEGER NOT NULL DEFAULT 1,reviewer INTEGER REFERENCES users(id),movement_id INTEGER REFERENCES movements(id),request_id TEXT UNIQUE NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL);
+
+CREATE INDEX IF NOT EXISTS idx_items_section_active ON items(section_id, active);
+CREATE INDEX IF NOT EXISTS idx_movements_section_date ON movements(section_id, date);
+CREATE INDEX IF NOT EXISTS idx_counts_sec_month ON counts(section_id, month);
+CREATE INDEX IF NOT EXISTS idx_lines_count_item ON lines(count_id, item_id);
+CREATE INDEX IF NOT EXISTS idx_snapshots_count ON snapshots(count_id, version);
+CREATE INDEX IF NOT EXISTS idx_submissions_sec_status ON submissions(section_id, status);

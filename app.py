@@ -57,28 +57,37 @@ REPORT_CACHE = {}
 def invalidate_report_cache():
     REPORT_CACHE.clear()
 
+INVENTORY_MUTATION_TABLES = ('items', 'movements', 'counts', 'lines', 'submissions', 'snapshots', 'sections', 'properties')
+
+def _is_inventory_mutation(sql):
+    if not sql or not sql.strip():
+        return False
+    parts = sql.strip().split(None, 2)
+    first_word = parts[0].upper()
+    if first_word in ('INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER'):
+        sql_lower = sql.lower()
+        return any(t in sql_lower for t in INVENTORY_MUTATION_TABLES)
+    return False
+
 class DBWrapper:
     def __init__(self, conn):
         self._conn = conn
     def execute(self, sql, args=()):
-        first_word = sql.strip().split(None, 1)[0].upper() if sql and sql.strip() else ''
-        if first_word in ('INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER'):
+        if _is_inventory_mutation(sql):
             invalidate_report_cache()
         return self._conn.execute(sql, args)
     def executemany(self, sql, params):
-        invalidate_report_cache()
+        if _is_inventory_mutation(sql):
+            invalidate_report_cache()
         return self._conn.executemany(sql, params)
     def executescript(self, sql):
-        invalidate_report_cache()
+        if _is_inventory_mutation(sql):
+            invalidate_report_cache()
         return self._conn.executescript(sql)
     def commit(self):
-        res = self._conn.commit()
-        invalidate_report_cache()
-        return res
+        return self._conn.commit()
     def rollback(self):
-        res = self._conn.rollback()
-        invalidate_report_cache()
-        return res
+        return self._conn.rollback()
     def __getattr__(self, name):
         return getattr(self._conn, name)
     def __setattr__(self, name, value):
@@ -255,14 +264,14 @@ def report(sid,m):
     if c and c['status']=='CLOSED':
         if cache_key in REPORT_CACHE:
             ts, cached = REPORT_CACHE[cache_key]
-            if now_ts - ts < 60:
+            if now_ts - ts < 300:
                 return copy.deepcopy(cached)
         data = json.loads(one('SELECT data FROM snapshots WHERE count_id=? ORDER BY version DESC LIMIT 1',(c['id'],))['data'])
         REPORT_CACHE[cache_key] = (now_ts, data)
         return copy.deepcopy(data)
     if can_cache and cache_key in REPORT_CACHE:
         ts, cached = REPORT_CACHE[cache_key]
-        if now_ts - ts < 30:
+        if now_ts - ts < 60:
             return copy.deepcopy(cached)
     prev=one("SELECT c.id,c.month FROM counts c WHERE section_id=? AND month<? AND status='CLOSED' ORDER BY month DESC LIMIT 1",(sid,m))
     previous={}
@@ -357,11 +366,37 @@ def items():
     else:
         stocks={}
         current_m=date.today().isoformat()[:7]
-        closed_sections={c['section_id'] for c in rows("SELECT section_id FROM counts WHERE month=? AND status='CLOSED'",(current_m,))}
-        for s in set(r['section_id'] for r in result):
-            is_closed=(s in closed_sections)
-            for r_rep in report(s,current_m):
-                stocks[r_rep['id']]=r_rep['actual'] if is_closed else r_rep['expected']
+        active_sids=set(r['section_id'] for r in result)
+        if active_sids:
+            closed_sids=set()
+            for c in rows("SELECT c.section_id, s.data FROM counts c JOIN snapshots s ON s.count_id=c.id WHERE c.month=? AND c.status='CLOSED' ORDER BY s.version ASC",(current_m,)):
+                if c['section_id'] in active_sids:
+                    closed_sids.add(c['section_id'])
+                    try:
+                        for row in json.loads(c['data']): stocks[row['id']]=row.get('actual') or 0
+                    except Exception: pass
+            open_sids=[s for s in active_sids if s not in closed_sids]
+            if open_sids:
+                prev_snaps={}
+                for pc in rows("SELECT c.section_id, c.month, s.data FROM counts c JOIN snapshots s ON s.count_id=c.id WHERE c.month < ? AND c.status='CLOSED' ORDER BY c.month ASC, s.version ASC",(current_m,)):
+                    if pc['section_id'] in open_sids:
+                        try:
+                            prev_snaps[pc['section_id']]={'month':pc['month'],'items':{r['id']:r.get('actual') or 0 for r in json.loads(pc['data'])}}
+                        except Exception: pass
+                all_moves=rows('SELECT item_id, substr(date, 1, 7) as ym, SUM(qty) as total_qty FROM movements WHERE substr(date, 1, 7) <= ? GROUP BY item_id, substr(date, 1, 7)',(current_m,))
+                moves_by_item={}
+                for m_row in all_moves: moves_by_item.setdefault(m_row['item_id'],[]).append(m_row)
+                for item_row in result:
+                    iid=item_row['id']
+                    if iid in stocks: continue
+                    snap=prev_snaps.get(item_row['section_id'])
+                    if snap:
+                        base=snap['items'].get(iid,0)
+                        since_month=snap['month']
+                        moves_sum=sum(m_row['total_qty'] for m_row in moves_by_item.get(iid,[]) if m_row['ym']>since_month)
+                        stocks[iid]=base+moves_sum
+                    else:
+                        stocks[iid]=sum(m_row['total_qty'] for m_row in moves_by_item.get(iid,[]))
         for r in result: r['stock']=stocks.get(r['id'],0)
     return jsonify(result)
 @app.get('/api/item-options')
@@ -565,11 +600,24 @@ def counts():
     if g.user['access_role']=='STAFF' and m!=date.today().isoformat()[:7]: fail('The count month is set automatically. Open older corrections from Corrections.',403)
     secs=[s for s in visible_sections() if s['active']]
     all_counts={c['section_id']:c for c in rows('SELECT * FROM counts WHERE month=?',(m,))}
+    closed_snaps={}
+    for row in rows("SELECT c.section_id, s.data FROM counts c JOIN snapshots s ON s.count_id=c.id WHERE c.month=? AND c.status='CLOSED' ORDER BY s.version ASC",(m,)):
+        try: closed_snaps[row['section_id']]=json.loads(row['data'])
+        except Exception: pass
+    tot_map={r['section_id']:r['cnt'] for r in rows('SELECT section_id, COUNT(*) as cnt FROM items WHERE (active=1 OR id IN (SELECT item_id FROM movements WHERE substr(date,1,7)=?)) AND substr(created,1,7)<=? GROUP BY section_id',(m,m))}
+    comp_map={r['section_id']:r['cnt'] for r in rows('SELECT c.section_id, COUNT(l.item_id) as cnt FROM lines l JOIN counts c ON c.id=l.count_id JOIN items i ON i.id=l.item_id WHERE c.month=? AND l.actual IS NOT NULL AND (i.active=1 OR i.id IN (SELECT item_id FROM movements WHERE substr(date,1,7)=?)) AND substr(i.created,1,7)<=? GROUP BY c.section_id',(m,m,m))}
     for s in secs:
         c=all_counts.get(s['id'])
         if c and c['submitted_by'] is not None and c['submitted_by']!=g.user['id'] and (g.user['access_role']=='STAFF' or (c['status']=='RETURNED' and not access.owner())): continue
-        rr=report(s['id'],m)
-        result.append(dict(s,count_id=c['id'] if c else None,status=c['status'] if c else 'OPEN',total=len(rr),completed=0 if g.user['access_role']=='STAFF' and c and c['submitted_by'] is None else sum(r['actual'] is not None for r in rr)))
+        sid=s['id']
+        if c and c['status']=='CLOSED' and sid in closed_snaps:
+            snap=closed_snaps[sid]
+            tot=len(snap)
+            comp=sum(1 for r in snap if r.get('actual') is not None)
+        else:
+            tot=tot_map.get(sid,0)
+            comp=0 if (g.user['access_role']=='STAFF' and c and c['submitted_by'] is None) else comp_map.get(sid,0)
+        result.append(dict(s,count_id=c['id'] if c else None,status=c['status'] if c else 'OPEN',total=tot,completed=comp))
     return jsonify(result)
 @app.get('/api/counts/<int:sid>/<m>')
 @need()
