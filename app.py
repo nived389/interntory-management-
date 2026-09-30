@@ -250,7 +250,12 @@ def items():
         result=[{k:r[k] for k in ('id','code','name','section_id','specification','category','unit','photo','section','property_id')} for r in result]
     else:
         stocks={}
-        for s in set(r['section_id'] for r in result): stocks.update({r['id']:r['actual'] if one("SELECT id FROM counts WHERE section_id=? AND month=? AND status='CLOSED'",(s,date.today().isoformat()[:7])) else r['expected'] for r in report(s,date.today().isoformat()[:7])})
+        current_m=date.today().isoformat()[:7]
+        closed_sections={c['section_id'] for c in rows("SELECT section_id FROM counts WHERE month=? AND status='CLOSED'",(current_m,))}
+        for s in set(r['section_id'] for r in result):
+            is_closed=(s in closed_sections)
+            for r_rep in report(s,current_m):
+                stocks[r_rep['id']]=r_rep['actual'] if is_closed else r_rep['expected']
         for r in result: r['stock']=stocks.get(r['id'],0)
     return jsonify(result)
 @app.get('/api/item-options')
@@ -751,4 +756,4 @@ from importer import register
 register(sys.modules[__name__])
 from approvals import register as register_approvals
 register_approvals(sys.modules[__name__])
-if __name__=='__main__': app.run(host=os.environ.get('HOST','127.0.0.1'),port=int(os.environ.get('PORT','5055')),debug=False)
+if __name__=='__main__': app.run(host=os.environ.get('HOST','127.0.0.1'),port=int(os.environ.get('PORT','5055')),debug=False,threaded=True)
