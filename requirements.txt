@@ -29,3 +29,4 @@ typing_extensions==4.16.0
 urllib3==2.6.3
 Werkzeug==3.1.9
 zipp==3.23.1
+libsql==0.1.11

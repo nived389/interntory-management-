@@ -11,8 +11,14 @@ import credential_vault
 import cloud_files
 
 ROOT=Path(__file__).parent
-DATA=Path(os.environ.get('INVENTORY_DATA', ROOT/'data')); DATA.mkdir(exist_ok=True,parents=True)
-for folder in ('photos','reports'): (DATA/folder).mkdir(exist_ok=True)
+_default_data = Path('/tmp/inventory_data') if os.environ.get('VERCEL') else ROOT/'data'
+DATA=Path(os.environ.get('INVENTORY_DATA', _default_data))
+try:
+    DATA.mkdir(exist_ok=True,parents=True)
+    for folder in ('photos','reports'): (DATA/folder).mkdir(exist_ok=True)
+except OSError:
+    pass
+
 if not os.environ.get('TURSO_DATABASE_URL') and os.environ.get('INVENTORY_SKIP_OWNER_SEED') != '1':
     _conn_file = DATA / 'turso-connection.json'
     if _conn_file.is_file():
@@ -23,10 +29,18 @@ if not os.environ.get('TURSO_DATABASE_URL') and os.environ.get('INVENTORY_SKIP_O
                 os.environ['TURSO_AUTH_TOKEN'] = _t_cfg['TURSO_AUTH_TOKEN']
         except Exception:
             pass
+
 secret=DATA/'session.key'
-if not os.environ.get('SESSION_SECRET') and not secret.exists(): secret.write_text(secrets.token_hex(32)); secret.chmod(0o600)
+if not os.environ.get('SESSION_SECRET') and not secret.exists():
+    try:
+        secret.write_text(secrets.token_hex(32))
+        secret.chmod(0o600)
+    except OSError:
+        pass
+
 app=Flask(__name__,static_folder='static')
-app.config.update(SECRET_KEY=os.environ.get('SESSION_SECRET') or secret.read_text(),MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1',PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
+_session_secret = os.environ.get('SESSION_SECRET') or (secret.read_text() if secret.exists() else 'inventory-fallback-secret-key-32b')
+app.config.update(SECRET_KEY=_session_secret,MAX_CONTENT_LENGTH=150*1024*1024,SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=os.environ.get('HTTPS')=='1' or bool(os.environ.get('VERCEL')),PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
 failures={}
 REASONS=['Accidental drop / handling','Staff handling damage','Guest-related damage','Wear and tear','Kitchen / service operation','Missing / unable to locate','Unknown','Other']
 def now(): return datetime.now().isoformat(timespec='seconds')
