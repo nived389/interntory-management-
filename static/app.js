@@ -50,7 +50,7 @@ function bulkToolbar(){
 async function inventory(){
  state.items=await api('/items?property='+state.property);
  if(!state.selectedItems)state.selectedItems=new Set();
- return pageHead('Item catalogue','A home for every item, across every section.',`<button class="primary" data-addinventory>+ Add inventory</button>`)+`<section class="panel"><div class="toolbar"><input type="search" id="item-search" placeholder="Search item name, serial number or code…" aria-label="Search items" value="${esc(state.search)}"><select id="section-filter" aria-label="Section"><option value="">All sections</option>${sections().map(s=>`<option value="${s.id}" ${String(s.id)===state.section?'selected':''}>${esc(s.name)}</option>`).join('')}</select><span class="badge">${state.items.length} items</span></div>${bulkToolbar()}<div id="item-table">${inventoryTable()}</div></section>`
+ return pageHead('Item catalogue','A home for every item, across every section.',`<button class="primary" data-addinventory>+ Add inventory</button>`)+`<section class="panel"><div class="toolbar"><input type="search" id="item-search" placeholder="Search item name, serial number or code…" aria-label="Search items" value="${esc(state.search)}">${master()?`<select id="inventory-property-filter" aria-label="Property filter"><option value="" ${state.property===''?'selected':''}>All properties</option>${state.context.properties.map(p=>`<option value="${p.id}" ${String(p.id)===state.property?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`:''}<select id="section-filter" aria-label="Section"><option value="">All sections</option>${sections().map(s=>`<option value="${s.id}" ${String(s.id)===state.section?'selected':''}>${esc(s.name)}</option>`).join('')}</select><span class="badge">${state.items.length} items</span></div>${bulkToolbar()}<div id="item-table">${inventoryTable()}</div></section>`
 }
 function inventoryTable(){
  const canEdit=can('edit_items');
@@ -394,6 +394,8 @@ function bindAssets(){
       state.selectedAssets.clear();
     }
   );
+  const submitBtn=$('#dialog-form [type="submit"]');
+  if(submitBtn){submitBtn.textContent=`Delete ${ids.length} asset(s)`;submitBtn.className='danger';}
  };
  bindAssetRowEvents();
  updateAssetBulkUI();
@@ -459,6 +461,7 @@ function bindPage(){
  if(state.page==='assets')bindAssets();
  if($('#item-search'))$('#item-search').oninput=e=>{state.search=e.target.value;$('#item-table').innerHTML=inventoryTable();bindItems()};
  if($('#section-filter'))$('#section-filter').onchange=e=>{state.section=e.target.value;$('#item-table').innerHTML=inventoryTable();bindItems()};
+ if($('#inventory-property-filter'))$('#inventory-property-filter').onchange=e=>{state.property=e.target.value;state.section='';state.selectedItems?.clear();if($('#property'))$('#property').value=state.property;render()};
  if($('#share-count'))$('#share-count').onclick=async()=>{try{const users=(await api('/users')).filter(u=>u.active&&u.role==='STAFF'&&u.permissions.includes('counts')&&(u.section_scope===null||u.section_scope.includes(state.countSection)));if(!users.length)return toast('Give a staff member count permission and section access first.');showModal('Share section with staff',`<p>The complete item list will be sent with blank count fields. Existing draft entries are kept in the audit history. Staff cannot see stock balances.</p>${selectField('Staff member','staff_id',users.map(u=>[u.id,u.name+' / '+u.username]))}`,async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'share',staff_id:Number(d.staff_id)});toast('Section shared with staff')})}catch(e){toast(e.message)}};
  if($('#back-counts'))$('#back-counts').onclick=()=>{state.countSection=null;render()};
  if(state.page==='counts'&&state.countSection&&state.countData){
@@ -478,9 +481,24 @@ function bindPage(){
    bindCountRows(state.countData,locked);
   };
  }
-  for(const [id,action]of [['submit-count','submit'],['close-count','close'],['reopen-count','reopen']])if($('#'+id))$('#'+id).onclick=()=>{
+  for(const [id,action]of [['submit-count','submit'],['close-count','close'],['reopen-count','reopen']])if($('#'+id))$('#'+id).onclick=async()=>{
+   if(action==='close'){
+    const btn=$('#close-count');
+    if(btn){btn.disabled=true;btn.textContent='Accepting & closing…';}
+    try{
+     await syncDrafts();
+     if(Object.keys(drafts()).some(k=>k.startsWith(`${state.countSection}/${state.month}/`)))throw new Error('Sync pending count drafts before closing.');
+     await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'close'});
+     toast('Month count accepted and closed');
+     await render();
+    }catch(e){
+     if(btn){btn.disabled=false;btn.textContent='Accept & close month';}
+     toast(e.message);
+    }
+    return;
+   }
    const uncounted=state.countData?.items.filter(r=>!isItemCounted(r)).length||0;
-   showModal(action==='close'?'Close this month?':action==='reopen'?'Reopen this count?':'Submit your count?',`<p class="help">${action==='close'?'This saves an immutable snapshot and archives Excel/PDF reports. Actual quantities become the next period’s opening stock.':action==='reopen'?'Reopening unlocks this section. Previous snapshots and exports remain in the archive.':'Check all physical quantities before submitting. An authorized reviewer will review the differences.'}</p>${action==='submit'&&uncounted>0?`<div class="notice" style="margin-top:10px"><strong>Note:</strong> ${uncounted} item${uncounted===1?' is':'s are'} still uncounted in this section.</div>`:''}${action==='reopen'?field('Reason for reopening','reason','text','',true):''}`,async d=>{await syncDrafts();if(Object.keys(drafts()).some(k=>k.startsWith(`${state.countSection}/${state.month}/`)))throw new Error('Sync pending count drafts before submitting.');await api(`/counts/${state.countSection}/${state.month}`,'POST',{action,...d});toast('Count '+(action==='close'?'closed':action==='submit'?'submitted':'reopened'))});
+   showModal(action==='reopen'?'Reopen this count?':'Submit your count?',`<p class="help">${action==='reopen'?'Reopening unlocks this section. Previous snapshots and exports remain in the archive.':'Check all physical quantities before submitting. An authorized reviewer will review the differences.'}</p>${action==='submit'&&uncounted>0?`<div class="notice" style="margin-top:10px"><strong>Note:</strong> ${uncounted} item${uncounted===1?' is':'s are'} still uncounted in this section.</div>`:''}${action==='reopen'?field('Reason for reopening','reason','text','',true):''}`,async d=>{await syncDrafts();if(Object.keys(drafts()).some(k=>k.startsWith(`${state.countSection}/${state.month}/`)))throw new Error('Sync pending count drafts before submitting.');await api(`/counts/${state.countSection}/${state.month}`,'POST',{action,...d});toast('Count '+(action==='submit'?'submitted':'reopened'))});
   };
  $$('[data-report]').forEach(b=>b.onclick=()=>{state.reportKind=b.dataset.report;render()});
  if($('#f-report_month'))$('#f-report_month').onchange=e=>{if(e.target.checkValidity()&&e.target.value){state.month=e.target.value;render()}};
@@ -575,6 +593,8 @@ function bindBulkSelection(){
     updateBulkUI();
    }
   );
+  const submitBtn=$('#dialog-form [type="submit"]');
+  if(submitBtn){submitBtn.textContent=`Delete ${ids.length} item(s)`;submitBtn.className='danger';}
  };
 }
 function bindItems(){
@@ -749,23 +769,68 @@ function bindReviews(){
  $$('[data-review-photo]').forEach(b=>b.onclick=()=>showModal('Report photo',`<img class="preview-full" src="/photo/${esc(b.dataset.reviewPhoto)}" alt="Submitted evidence">`));
  for(const [attr,action] of [['acceptReport','accept'],['returnReport','return']]){
   const selector=attr==='acceptReport'?'[data-accept-report]':'[data-return-report]';
-  $$(selector).forEach(b=>b.onclick=()=>{const r=state.reviewData.submissions.find(r=>r.id===Number(b.dataset[attr]));showModal(action==='accept'?'Accept report?':'Return report for correction',action==='accept'?'<p>Accept this report and apply its quantity to stock.</p>':field('What must staff correct?','feedback','text','',true),async d=>{await api('/reviews/'+r.id,'POST',{action,revision:r.revision,...d});toast(action==='accept'?'Report accepted. Stock updated.':'Returned to the original staff member.')})});
+  $$(selector).forEach(b=>b.onclick=async()=>{
+   const r=state.reviewData.submissions.find(r=>r.id===Number(b.dataset[attr]));
+   if(action==='accept'){
+    b.disabled=true;const old=b.textContent;b.textContent='Approving…';
+    try{
+     await api('/reviews/'+r.id,'POST',{action:'accept',revision:r.revision});
+     toast(r.payload?.type==='NEW_ITEM'?'Item approved and added to inventory list.':'Report approved. Stock updated.');
+     refreshReviewBadge();
+     await render();
+    }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
+    return;
+   }
+   showModal('Return report for correction',field('What must staff correct?','feedback','text','',true),async d=>{await api('/reviews/'+r.id,'POST',{action,revision:r.revision,...d});toast('Returned to the original staff member.');refreshReviewBadge();await render();});
+  });
  }
+ $$('[data-approve-single]').forEach(b=>b.onclick=async()=>{
+  const id=Number(b.dataset.approveSingle),rev=Number(b.dataset.revision);
+  const r=state.reviewData?.submissions?.find(x=>x.id===id);
+  b.disabled=true;const old=b.textContent;b.textContent='Approving…';
+  try{
+   await api('/reviews/list','POST',{action:'accept',entries:[{id,revision:rev}],marked:[]});
+   toast(r?.payload?.type==='NEW_ITEM'?'Item approved and added to inventory list.':'Report approved. Stock updated.');
+   refreshReviewBadge();
+   await render();
+  }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
+ });
  $$('[data-correct-report]').forEach(b=>b.onclick=async()=>{
   const r=state.reviewData.submissions.find(r=>r.id===Number(b.dataset.correctReport)),p=r.payload;let getPhoto,choices=[];
   if(p.type!=='NEW_ITEM'){try{choices=await itemOptions(p.type==='PURCHASE'?'purchases':'breakage')}catch(e){toast(e.message);return}}
-  showModal(r.correction_group?'Correct marked item':'Correct & resubmit',`<p class="notice">${esc(r.feedback)}</p><p>${esc(p.name)} · ${esc(p.date)} (original date)</p>${p.type==='NEW_ITEM'?field('Item name','name','text',p.name,true)+field('Unit','unit','text',p.unit||'Nos',true):selectField('Reported item','item_id',choices.filter(i=>i.section_id===r.section_id).map(i=>[i.id,i.name]),p.item_id)}${field('Correct quantity','qty','number',Math.abs(p.qty),true,`min="${p.type==='NEW_ITEM'?0:1}" step="1"`)}${['PURCHASE','NEW_ITEM'].includes(p.type)?field('Unit rate (leave blank to keep)','rate','number','',false,'min="0" step="0.01"'):''}${field('Reason','reason','text',p.reason||'',p.type==='BREAKAGE'||p.type==='DAMAGE')}${field('Correction explanation','note','text',p.note||'',true)}${p.photo?`<p>Original photo stays unless you take a replacement.</p>${uploadField(false)}`:''}`,async d=>{const photo=getPhoto?.();await api('/corrections/'+r.id,'POST',{action:'resubmit',...d,...(photo?{photo}:{})});toast(r.correction_group?'Correction saved. Send the full list when ready.':'Sent to master for review')});
+  showModal(r.correction_group?'Correct marked item':'Correct & resubmit',`<p class="notice">${esc(r.feedback)}</p><p>${esc(p.name)} · ${esc(p.date)} (original date)</p>${p.type==='NEW_ITEM'?field('Item name','name','text',p.name,true)+field('Unit','unit','text',p.unit||'Nos',true):selectField('Reported item','item_id',choices.filter(i=>i.section_id===r.section_id).map(i=>[i.id,i.name]),p.item_id)}${field('Correct quantity','qty','number',Math.abs(p.qty),true,`min="${p.type==='NEW_ITEM'?0:1}" step="1"`)}${['PURCHASE','NEW_ITEM'].includes(p.type)?field('Unit rate (leave blank to keep)','rate','number','',false,'min="0" step="0.01"'):''}${field('Reason','reason','text',p.reason||'',p.type==='BREAKAGE'||p.type==='DAMAGE')}${field('Correction explanation','note','text',p.note||'',true)}${p.photo?`<p>Original photo stays unless you take a replacement.</p>${uploadField(false)}`:''}`,async d=>{const photo=getPhoto?.();await api('/corrections/'+r.id,'POST',{action:'resubmit',...d,...(photo?{photo}:{})});toast(r.correction_group?'Correction saved. Send the full list when ready.':'Sent to master for review');refreshReviewBadge();await render()});
   if(p.photo)getPhoto=photoBinding();
  });
- $$('[data-review-list]').forEach(b=>b.onclick=()=>{
+ $$('[data-review-list]').forEach(b=>b.onclick=async()=>{
   const group=state.submissionGroups[Number(b.dataset.reviewList)],marked=$$(`[data-mark-group="${b.dataset.reviewList}"]:checked`).map(x=>Number(x.value)),action=b.dataset.listAction;
-  if(action==='return'&&!marked.length)return toast('Mark at least one doubtful item.');
-  showModal(action==='return'?'Return full list':'Accept full list',action==='return'?field('What must staff check?','feedback','text','',true):'<p>Accept every item in this list and update inventory.</p>',async d=>{await api('/reviews/list','POST',{action,entries:group.map(q=>({id:q.id,revision:q.revision})),marked,...d});toast(action==='return'?'Full list returned to its submitter.':'List accepted. Inventory updated.')});
+  if(action==='return'){
+   if(!marked.length)return toast('Mark at least one doubtful item.');
+   showModal('Return list with marked items',field('What must staff check?','feedback','text','',true),async d=>{await api('/reviews/list','POST',{action,entries:group.map(q=>({id:q.id,revision:q.revision})),marked,...d});toast('Full list returned to its submitter.');refreshReviewBadge();await render()});
+   return;
+  }
+  if(action==='accept'){
+   b.disabled=true;const old=b.textContent;b.textContent='Approving…';
+   try{
+    await api('/reviews/list','POST',{action:'accept',entries:group.map(q=>({id:q.id,revision:q.revision})),marked:[]});
+    const isNew=group[0]?.payload?.type==='NEW_ITEM';
+    toast(isNew?'Item(s) approved and added to inventory list.':'Report(s) approved. Inventory updated.');
+    refreshReviewBadge();
+    await render();
+   }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
+  }
  });
- $$('[data-resubmit-list]').forEach(b=>b.onclick=()=>showModal('Send corrected list?', '<p>Send the complete list to master for another review.</p>',async()=>{await api('/corrections/list/'+b.dataset.resubmitList+'/submit','POST',{});toast('Full list sent for review')}));
+ $$('[data-resubmit-list]').forEach(b=>b.onclick=async()=>{
+  b.disabled=true;const old=b.textContent;b.textContent='Sending…';
+  try{
+   await api('/corrections/list/'+b.dataset.resubmitList+'/submit','POST',{});
+   toast('Full list sent for review');
+   refreshReviewBadge();
+   await render();
+  }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
+ });
  if($('#return-count-list'))$('#return-count-list').onclick=()=>{
   const marked=$$('[data-mark-count]:checked').map(x=>Number(x.value));if(!marked.length)return toast('Mark at least one item.');
-  showModal('Return full monthly count',field('What should the submitter check?','reason','text','',true),async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'return',item_ids:marked,...d});toast('Full count returned with marked items')});
+  showModal('Return full monthly count',field('What should the submitter check?','reason','text','',true),async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'return',item_ids:marked,...d});toast('Full count returned with marked items');refreshReviewBadge();await render()});
  };
 }
 async function refreshReviewBadge(){
@@ -789,5 +854,17 @@ async function staffAddPage(){return pageHead('Add items / purchases','Items and
 function submissionLists(data){
  const grouped=new Map();for(const q of data.submissions){const p=q.payload;const key=q.correction_group||[q.actor,q.section_id,p.type,p.date,q.status].join('/');if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(q)}
  state.submissionGroups=[...grouped.values()];
- return state.submissionGroups.map((group,index)=>{const first=group[0],pending=group.every(q=>q.status==='PENDING'),returned=group.every(q=>q.status==='RETURNED');return `<section class="submission-list"><h3>${esc(first.payload.type.replace('_',' '))} · ${esc(first.section)} · ${esc(first.payload.date)}</h3><p>Submitted by ${esc(first.username)} · ID ${first.actor} · ${group.length} item(s)</p>${group.map(q=>{const p=q.payload;return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`}).join('')}<div class="actions">${data.reviewer&&pending?`<button class="primary" data-review-list="${index}" data-list-action="accept">Accept full list</button><button data-review-list="${index}" data-list-action="return">Return list with marked items</button>`:''}${!data.reviewer&&returned&&first.correction_group?`<button class="primary" data-resubmit-list="${first.correction_group}" ${group.some(q=>q.needs_correction)?'disabled':''}>Send full list to master</button>`:''}</div></section>`}).join('');
+ return state.submissionGroups.map((group,index)=>{
+  const first=group[0],pending=group.every(q=>q.status==='PENDING'),returned=group.every(q=>q.status==='RETURNED');
+  const type=first.payload.type;
+  const isNew=type==='NEW_ITEM';
+  const isBreak=type==='BREAKAGE'||type==='DAMAGE';
+  const isPurch=type==='PURCHASE';
+  const acceptText=isNew?(group.length>1?'Approve & add items to list':'Approve & add to list'):isBreak?(group.length>1?'Approve full breakage list':'Approve breakage report'):isPurch?(group.length>1?'Approve full purchase list':'Approve purchase'):(group.length>1?'Approve full list':'Approve');
+  const canSingleApprove=data.reviewer&&pending&&!first.correction_group&&group.length>1;
+  return `<section class="submission-list"><h3>${esc(first.payload.type.replace('_',' '))} · ${esc(first.section)} · ${esc(first.payload.date)}</h3><p>Submitted by ${esc(first.username)} · ID ${first.actor} · ${group.length} item(s)</p>${group.map(q=>{
+   const p=q.payload;
+   return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${canSingleApprove?`<div style="margin-top:8px"><button class="small primary" data-approve-single="${q.id}" data-revision="${q.revision}">${isNew?'✓ Approve & add to list':'✓ Approve'}</button></div>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`
+  }).join('')}<div class="actions">${data.reviewer&&pending?`<button class="primary" data-review-list="${index}" data-list-action="accept">${acceptText}</button><button data-review-list="${index}" data-list-action="return">${group.length>1?'Return list with marked items':'Return for correction'}</button>`:''}${!data.reviewer&&returned&&first.correction_group?`<button class="primary" data-resubmit-list="${first.correction_group}" ${group.some(q=>q.needs_correction)?'disabled':''}>Send full list to master</button>`:''}</div></section>`
+ }).join('');
 }

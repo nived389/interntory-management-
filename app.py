@@ -548,18 +548,29 @@ def bulk_delete_items():
     pending_ids={json.loads(r['payload']).get('item_id') for r in queued}
     conflicts=[iid for iid in item_ids if iid in pending_ids]
     if conflicts: fail(f'Review outstanding reports before deleting items ({len(conflicts)} items pending review).',409)
-    db().execute('BEGIN IMMEDIATE'); deleted_count=0
-    for iid in item_ids:
-        old=one('SELECT * FROM items WHERE id=? AND active=1',(iid,))
-        if not old: continue
-        editable(old['section_id'],m)
-        db().execute("DELETE FROM lines WHERE item_id=? AND count_id IN (SELECT id FROM counts WHERE month=? AND status='OPEN')",(iid,m))
-        has_refs=one('SELECT 1 FROM movements WHERE item_id=? UNION ALL SELECT 1 FROM lines WHERE item_id=?',(iid,iid))
-        if has_refs: db().execute('UPDATE items SET active=0 WHERE id=?',(iid,))
-        else: db().execute('DELETE FROM items WHERE id=?',(iid,))
-        deleted_count+=1
-    audit('ITEMS_BULK_DELETED',{'item_ids':item_ids,'count':deleted_count})
-    db().commit(); return jsonify(ok=True,deleted=deleted_count)
+    db().execute('BEGIN IMMEDIATE')
+    ph=','.join('?'*len(item_ids))
+    targets=rows(f'SELECT id, section_id FROM items WHERE id IN ({ph}) AND active=1',tuple(item_ids))
+    if not targets:
+        db().commit()
+        return jsonify(ok=True,deleted=0)
+    unique_sids=set(r['section_id'] for r in targets)
+    for sid in unique_sids:
+        editable(sid,m)
+    target_ids=[r['id'] for r in targets]
+    t_ph=','.join('?'*len(target_ids))
+    db().execute(f"DELETE FROM lines WHERE item_id IN ({t_ph}) AND count_id IN (SELECT id FROM counts WHERE month=? AND status='OPEN')",(*target_ids,m))
+    ref_rows=rows(f"SELECT DISTINCT item_id FROM movements WHERE item_id IN ({t_ph}) UNION SELECT DISTINCT item_id FROM lines WHERE item_id IN ({t_ph})",(*target_ids,*target_ids))
+    items_with_refs=set(r['item_id'] for r in ref_rows)
+    items_without_refs=set(target_ids)-items_with_refs
+    if items_with_refs:
+        ref_ph=','.join('?'*len(items_with_refs))
+        db().execute(f"UPDATE items SET active=0 WHERE id IN ({ref_ph})",tuple(items_with_refs))
+    if items_without_refs:
+        no_ref_ph=','.join('?'*len(items_without_refs))
+        db().execute(f"DELETE FROM items WHERE id IN ({no_ref_ph})",tuple(items_without_refs))
+    audit('ITEMS_BULK_DELETED',{'item_ids':target_ids,'count':len(target_ids)})
+    db().commit(); return jsonify(ok=True,deleted=len(target_ids))
 
 @app.get('/api/assets')
 @need()
@@ -639,12 +650,15 @@ def bulk_delete_assets():
     asset_ids = [number(x, 1) for x in d.get('asset_ids', [])]
     if not asset_ids: fail('Select at least one asset to delete.')
     db().execute('BEGIN IMMEDIATE')
-    deleted = 0
-    for aid in asset_ids:
-        old = one('SELECT id,name FROM assets WHERE id=?', (aid,))
-        if old:
-            db().execute('DELETE FROM assets WHERE id=?', (aid,))
-            deleted += 1
+    ph = ','.join('?' * len(asset_ids))
+    targets = rows(f'SELECT id FROM assets WHERE id IN ({ph})', tuple(asset_ids))
+    if targets:
+        t_ids = [r['id'] for r in targets]
+        t_ph = ','.join('?' * len(t_ids))
+        db().execute(f'DELETE FROM assets WHERE id IN ({t_ph})', tuple(t_ids))
+        deleted = len(t_ids)
+    else:
+        deleted = 0
     audit('ASSETS_BULK_DELETED', {'asset_ids': asset_ids, 'count': deleted})
     db().commit()
     return jsonify(ok=True, deleted=deleted)
