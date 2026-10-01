@@ -1,5 +1,5 @@
 """Master review and private, author-owned correction lists."""
-import json,uuid
+import json,uuid,re
 from flask import g,request,jsonify
 import access
 
@@ -15,10 +15,11 @@ def register(a):
         a.section(q['section_id'])
         if a.one("SELECT id FROM counts WHERE section_id=? AND month>=? AND (status='CLOSED' OR (month>? AND status='SUBMITTED'))",(q['section_id'],p['date'][:7],p['date'][:7])):a.fail('Reopen finalized periods before reviewing this submission.',409)
 
-    def approve(q):
-        p=json.loads(q['payload']);open_period(q,p)
+    def approve(q, code=None, check_open=True):
+        p=json.loads(q['payload'])
+        if check_open: open_period(q,p)
         if p['type']=='NEW_ITEM':
-            code=a.next_item_code()
+            if not code: code=a.next_item_code()
             iid=a.db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,p['name'],q['section_id'],p['specification'],p.get('category',''),p.get('unit','Nos'),p.get('rate'),p['photo'],p['date']+'T00:00:00')).lastrowid
             p['item_id']=iid;typ='OPENING'
         else:
@@ -41,7 +42,7 @@ def register(a):
         for r in rr:
             r['payload']=json.loads(r['payload'])
             if private:r['payload'].pop('rate',None)
-        cc=a.rows("SELECT c.*,u.username,u.name staff,s.name section,(SELECT COUNT(*) FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL) counted_count,(SELECT COUNT(*) FROM items i WHERE i.section_id=c.section_id AND i.active=1) total_count FROM counts c LEFT JOIN users u ON u.id=c.submitted_by JOIN sections s ON s.id=c.section_id WHERE c.status IN ('SUBMITTED','RETURNED','CLOSED') OR (c.status='IN PROGRESS' AND EXISTS (SELECT 1 FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL)) ORDER BY c.month DESC")
+        cc=a.rows("SELECT c.*,u.username,u.name staff,s.name section,(SELECT COUNT(*) FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL) counted_count,(SELECT COUNT(*) FROM items i WHERE i.section_id=c.section_id AND i.active=1) total_count FROM counts c LEFT JOIN users u ON u.id=c.submitted_by JOIN sections s ON s.id=c.section_id WHERE (c.status IN ('SUBMITTED','RETURNED')) OR (c.status='IN PROGRESS' AND EXISTS (SELECT 1 FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL)) ORDER BY c.month DESC")
         cc=[r for r in cc if access.allows(r['section_id']) and (not private or (r['submitted_by']==g.user['id'] and r['status']=='RETURNED'))]
         return jsonify(submissions=rr,counts=cc,reviewer=not private)
 
@@ -70,7 +71,24 @@ def register(a):
                 others=a.rows('SELECT id FROM submissions WHERE correction_group=? AND status=?',(q['correction_group'],'PENDING'))
                 if not {r['id'] for r in others}<={r['id'] for r in qs}:a.fail('Review the complete correction list.',409)
         if action=='accept':
-            for q in qs:approve(q)
+            first_p=json.loads(qs[0]['payload'])
+            open_period(qs[0],first_p)
+            codes=[]
+            if first_p.get('type')=='NEW_ITEM':
+                rows_codes = a.rows("SELECT code FROM items WHERE code LIKE 'INV-%'")
+                max_num = 0
+                for r in rows_codes:
+                    m = re.match(r'^INV-(\d+)$', r.get('code') or '')
+                    if m: max_num = max(max_num, int(m.group(1)))
+                curr = max_num + 1
+                for _ in qs:
+                    while a.one("SELECT 1 FROM items WHERE code=?", (f"INV-{curr:04d}",)):
+                        curr += 1
+                    codes.append(f"INV-{curr:04d}")
+                    curr += 1
+            for idx, q in enumerate(qs):
+                c = codes[idx] if idx < len(codes) else None
+                approve(q, code=c, check_open=False)
         elif action=='return':
             feedback=str(d.get('feedback','')).strip()
             if not feedback or not marked or not set(marked)<={q['id'] for q in qs}:a.fail('Mark items and explain what needs correcting.')

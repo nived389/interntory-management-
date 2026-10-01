@@ -330,7 +330,7 @@ def report(sid,m):
         expected=opening+added-damage+adjustment
         line=count_lines.get(i['id'])
         actual=line['actual'] if line else None
-        result.append(dict(i,submitted_by=(line.get('username') or '') if line else '',review_note=line.get('review_note','') if line else '',needs_correction=line.get('needs_correction',0) if line else 0,previous=opening,added=added,damage=damage,adjustment=adjustment,expected=expected,actual=actual,difference=actual-expected if actual is not None else None,note=line['note'] if line else '',flag=line['flag'] if line else '',purchase_value=sum(x['qty']*x['rate'] for x in moves if x['type'] in ('OPENING','PURCHASE') and x['rate'] is not None),breakage_qty=-sum(x['qty'] for x in moves if x['type']=='BREAKAGE'),breakage_value=sum(-x['qty']*x['rate'] for x in moves if x['type']=='BREAKAGE' and x['rate'] is not None),missing_rates=sum(x['rate'] is None for x in moves)))
+        result.append(dict(i,status=(c['status'] if c else 'OPEN'),submitted_by=(line.get('username') or '') if line else '',review_note=line.get('review_note','') if line else '',needs_correction=line.get('needs_correction',0) if line else 0,previous=opening,added=added,damage=damage,adjustment=adjustment,expected=expected,actual=actual,difference=actual-expected if actual is not None else None,note=line['note'] if line else '',flag=line['flag'] if line else '',purchase_value=sum(x['qty']*x['rate'] for x in moves if x['type'] in ('OPENING','PURCHASE') and x['rate'] is not None),breakage_qty=-sum(x['qty'] for x in moves if x['type']=='BREAKAGE'),breakage_value=sum(-x['qty']*x['rate'] for x in moves if x['type']=='BREAKAGE' and x['rate'] is not None),missing_rates=sum(x['rate'] is None for x in moves)))
     if can_cache:
         REPORT_CACHE[cache_key] = (now_ts, result)
     return copy.deepcopy(result)
@@ -453,7 +453,7 @@ def create_item():
     db().execute('BEGIN IMMEDIATE'); editable(sid,m)
     photo=save_photo(d.get('photo'))
     spec=d.get('specification','').strip(); category=d.get('category','').strip()
-    if g.user['access_role']=='STAFF':
+    if not access.owner():
         rid=d.get('request_id') or uuid.uuid4().hex
         if not re.fullmatch(r'[a-zA-Z0-9-]{16,80}',rid): fail('Invalid submission reference.')
         existing=one('SELECT id,actor FROM submissions WHERE request_id=?',(rid,))
@@ -466,10 +466,7 @@ def create_item():
         return jsonify(ok=True,pending=True,reference=cur.lastrowid)
     code=next_item_code()
     cur=db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,d['name'].strip(),sid,spec,category,d.get('unit','Nos'),rate,photo,now()))
-    if qty and g.user['access_role']=='STAFF':
-        payload=dict(item_id=cur.lastrowid,name=d['name'].strip(),type='PURCHASE',qty=qty,rate=rate,photo=None,reason='',note='New item received stock',date=date.today().isoformat())
-        db().execute('INSERT INTO submissions(actor,section_id,payload,request_id,created,updated) VALUES(?,?,?,?,?,?)',(g.user['id'],sid,json.dumps(payload),uuid.uuid4().hex,now(),now()))
-    elif qty: db().execute('INSERT INTO movements(item_id,section_id,type,qty,rate,name,note,date,actor,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)',(cur.lastrowid,sid,'OPENING',qty,rate,d['name'],'New item opening',date.today().isoformat(),g.user['id'],uuid.uuid4().hex))
+    if qty: db().execute('INSERT INTO movements(item_id,section_id,type,qty,rate,name,note,date,actor,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)',(cur.lastrowid,sid,'OPENING',qty,rate,d['name'],'New item opening',date.today().isoformat(),g.user['id'],uuid.uuid4().hex))
     audit('ITEM_CREATED',{'code':code,'name':d['name'],'quantity':qty}); db().commit(); return jsonify(ok=True,id=cur.lastrowid)
 @app.patch('/api/items/<int:iid>')
 @need('MASTER')
@@ -739,7 +736,7 @@ def movement():
     if qty<0 and r['expected']>0 and r['expected']+qty<0: fail('This quantity cannot be processed. Please contact the Master.')
     rate=money(d.get('rate')) if typ=='PURCHASE' else i['rate']
     photo=save_photo(d.get('photo')) if typ in ('BREAKAGE','DAMAGE') else None
-    if g.user['access_role']=='STAFF':
+    if not access.owner():
         payload=dict(item_id=i['id'],name=i['name'],type=typ,qty=qty,rate=rate,photo=photo,reason=reason,note=note,date=dt)
         cur=db().execute('INSERT INTO submissions(actor,section_id,payload,request_id,created,updated) VALUES(?,?,?,?,?,?)',(g.user['id'],i['section_id'],json.dumps(payload),rid,now(),now()))
         audit('SUBMISSION_SENT',{'id':cur.lastrowid,'payload':payload});db().commit()

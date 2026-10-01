@@ -176,5 +176,31 @@ def test_in_progress_count_automatically_pushed_to_reviews_inbox(clients):
     # Master can close the count directly since all items are counted
     assert p(m,path,{'action':'close'}).status_code==200
 
+    # Once closed, it disappears from reviews inbox
+    closed_counts=[c for c in m.get('/api/reviews').json['counts'] if c['section_id']==1 and c['month']==month]
+    assert len(closed_counts)==0
+
+
+def test_non_master_item_and_movement_always_require_approval(clients):
+    m,s,p=clients; month=mod.date.today().isoformat()[:7]
+    # Staff tries creating item: goes to submissions, pending=True, not in items table
+    res=p(s,'/items',{'name':'Staff Pending Item','section_id':1,'qty':5,'rate':100,'photo':photo()}).json
+    assert res.get('ok') is True
+    assert res.get('pending') is True
+    qid=res['reference']
+
+    # Confirm item is NOT in active items table yet
+    items=m.get('/api/items').json
+    assert not any(i['name']=='Staff Pending Item' for i in items)
+
+    # Master accepts the list
+    assert p(m,'/reviews/list',{'action':'accept','entries':[{'id':qid,'revision':1}],'marked':[]}).status_code==200
+
+    # Now it is in items table with serial code and opening movement
+    items=m.get('/api/items').json
+    created=next(i for i in items if i['name']=='Staff Pending Item')
+    assert created['stock']==5
+    assert created['code'].startswith('INV-')
+
 
 
