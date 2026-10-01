@@ -100,6 +100,7 @@ def register(a):
     @a.app.post('/api/corrections/<int:qid>')
     @a.app.post('/api/reviews/<int:qid>')
     @a.app.delete('/api/reviews/<int:qid>')
+    @a.app.patch('/api/reviews/<int:qid>')
     @a.need()
     def review_submission(qid):
         a.db().execute('BEGIN IMMEDIATE');q=load(qid);d=request.json if request.is_json else {};d=d or {};action=d.get('action');p=json.loads(q['payload'])
@@ -107,6 +108,40 @@ def register(a):
             if not reviewer():a.fail('Only the master admin can review submissions.',403)
             a.db().execute('DELETE FROM submissions WHERE id=?',(qid,))
             a.audit('SUBMISSION_DELETED',{'id':qid,'submitter':q['actor'],'section_id':q['section_id'],'payload':p})
+            a.db().commit();return jsonify(ok=True)
+        if request.method=='PATCH' or action=='edit':
+            if not reviewer():a.fail('Only the master admin can edit submissions.',403)
+            if q['status']=='ACCEPTED':a.fail('Cannot edit an already approved submission.',409)
+            if d.get('section_id'):
+                sid=a.number(d['section_id'],q['section_id'])
+                a.section(sid)
+                q['section_id']=sid
+            if 'name' in d:
+                name=str(d.get('name','')).strip()
+                if not name:a.fail('Item name is required.')
+                p['name']=name
+                if p.get('item_id') and p['type']!='NEW_ITEM':
+                    a.db().execute('UPDATE items SET name=? WHERE id=?',(name,p['item_id']))
+            if d.get('item_id') and p['type']!='NEW_ITEM':
+                i=a.item(d['item_id'])
+                p['item_id']=i['id']
+                if not d.get('name'):p['name']=i['name']
+                q['section_id']=i['section_id']
+            if 'qty' in d and d.get('qty') not in ('',None):
+                qty=a.number(d.get('qty'),0 if p['type']=='NEW_ITEM' else 1)
+                p['qty']=-abs(qty) if p['type'] in ('BREAKAGE','DAMAGE') else abs(qty)
+            if 'rate' in d:
+                if d.get('rate') in ('',None):
+                    p['rate']=None
+                else:
+                    p['rate']=a.money(d['rate'])
+            if 'specification' in d:p['specification']=str(d.get('specification','')).strip()
+            if 'category' in d:p['category']=str(d.get('category','')).strip()
+            if 'unit' in d:p['unit']=str(d.get('unit','Nos')).strip()
+            if 'reason' in d:p['reason']=str(d.get('reason','')).strip()
+            if 'note' in d:p['note']=str(d.get('note','')).strip()
+            a.db().execute('UPDATE submissions SET payload=?,section_id=?,updated=? WHERE id=?',(json.dumps(p),q['section_id'],a.now(),qid))
+            a.audit('SUBMISSION_EDITED',{'id':qid,'submitter':q['actor'],'before':json.loads(q['payload']),'after':p,'section_id':q['section_id']})
             a.db().commit();return jsonify(ok=True)
         if action=='resubmit':
             if q['actor']!=g.user['id']:a.fail('Only the original submitter can correct this report.',403)

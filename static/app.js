@@ -831,6 +831,7 @@ function bindReviews(){
    }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
   }
  });
+ $$('[data-edit-submission]').forEach(b=>b.onclick=()=>editSubmissionModal(Number(b.dataset.editSubmission)));
  $$('[data-delete-submission]').forEach(b=>b.onclick=async()=>{
   const id=Number(b.dataset.deleteSubmission);
   const name=b.dataset.itemName||'this submission';
@@ -857,6 +858,79 @@ function bindReviews(){
   showModal('Return full monthly count',field('What should the submitter check?','reason','text','',true),async d=>{await api(`/counts/${state.countSection}/${state.month}`,'POST',{action:'return',item_ids:marked,...d});toast('Full count returned with marked items');refreshReviewBadge();await render()});
  };
 }
+async function editSubmissionModal(qid){
+ const r=state.reviewData?.submissions?.find(x=>x.id===qid);
+ if(!r)return toast('Submission not found.');
+ const p=r.payload;
+ const isNew=p.type==='NEW_ITEM';
+ const isBreak=['BREAKAGE','DAMAGE'].includes(p.type);
+ const isPurch=p.type==='PURCHASE';
+
+ const secOpts=(state.context?.sections||[]).filter(s=>s.active).map(s=>[
+  s.id,
+  (state.context?.properties?.find(prop=>prop.id===s.property_id)?.name||'Property')+' / '+s.name
+ ]);
+
+ let itemSelectHtml='';
+ if(!isNew){
+  try{
+   const items=await api('/items');
+   itemSelectHtml=selectField('Link to catalog item (optional)','item_id',[['',`Current: ${esc(p.name)}`],...items.map(i=>[i.id,i.section+' / '+i.name])],p.item_id||'');
+  }catch(e){}
+ }
+
+ showModal('Edit submission',`
+  <div class="form-grid">
+   ${selectField('Property / section *','section_id',secOpts,r.section_id)}
+   ${itemSelectHtml}
+   ${field('Item name * (fix spelling)','name','text',p.name,true)}
+   ${field('Count / quantity *','qty','number',Math.abs(p.qty),true,'min="0" step="1"')}
+   ${field('Unit rate (INR)','rate','number',p.rate==null?'':p.rate/100,false,'min="0" step="0.01"')}
+   ${isNew?selectField('Unit','unit',[['Nos','Nos'],['Set','Set'],['Pair','Pair'],['Piece','Piece']],p.unit||'Nos'):''}
+   ${isNew?field('Specification','specification','text',p.specification||''):''}
+   ${isNew?field('Category','category','text',p.category||''):''}
+   ${isBreak?field('Breakage reason','reason','text',p.reason||''):''}
+   <div class="field full"><label for="f-note">Note / explanation</label><input id="f-note" name="note" type="text" value="${esc(p.note||'')}"></div>
+  </div>
+  <p class="help">Correct spelling, count quantity, rate, or section directly as admin. Changes save immediately for review.</p>
+ `,async d=>{
+  await api('/reviews/'+r.id,'POST',{
+   action:'edit',
+   name:d.name.trim(),
+   qty:d.qty,
+   rate:d.rate,
+   section_id:Number(d.section_id),
+   ...(d.item_id?{item_id:Number(d.item_id)}:{}),
+   ...(d.unit?{unit:d.unit}:{}),
+   ...(d.specification!==undefined?{specification:d.specification}:{}),
+   ...(d.category!==undefined?{category:d.category}:{}),
+   ...(d.reason!==undefined?{reason:d.reason}:{}),
+   ...(d.note!==undefined?{note:d.note}:{})
+  });
+  toast('Submission updated successfully.');
+  refreshReviewBadge();
+ });
+
+ $('#dialog-form [type="submit"]').textContent='Save changes';
+
+ if($('#f-item_id')){
+  $('#f-item_id').onchange=async e=>{
+   const selId=Number(e.target.value);
+   if(selId){
+    try{
+     const items=await api('/items');
+     const itm=items.find(i=>i.id===selId);
+     if(itm){
+      if($('#f-name'))$('#f-name').value=itm.name;
+      if($('#f-section_id'))$('#f-section_id').value=itm.section_id;
+      if($('#f-rate')&&itm.rate!=null)$('#f-rate').value=itm.rate/100;
+     }
+    }catch(err){}
+   }
+  };
+ }
+}
+
 async function refreshReviewBadge(){
  if(!state.user||document.hidden||(!staffMode()&&!state.user.is_owner))return;
  try{const d=await api(staffMode()?'/corrections':'/reviews');const n=d.submissions.filter(r=>d.reviewer?r.status==='PENDING':r.status==='RETURNED').length+d.counts.filter(r=>d.reviewer?r.status==='SUBMITTED':r.status==='RETURNED').length;const label=$(staffMode()?'[data-page="corrections"] span':'[data-page="reviews"] span');if(label)label.textContent=(staffMode()?'Corrections':'Reports & approvals')+(n?' ('+n+')':'');}catch(e){}
@@ -888,7 +962,7 @@ function submissionLists(data){
   const canSingleApprove=data.reviewer&&pending&&!first.correction_group&&group.length>1;
   return `<section class="submission-list"><h3>${esc(first.payload.type.replace('_',' '))} · ${esc(first.section)} · ${esc(first.payload.date)}</h3><p>Submitted by ${esc(first.username)} · ID ${first.actor} · ${group.length} item(s)</p>${group.map(q=>{
    const p=q.payload;
-   return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${data.reviewer?`<div class="submission-item-actions" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${canSingleApprove?`<button type="button" class="small primary" data-approve-single="${q.id}" data-revision="${q.revision}">${isNew?'✓ Approve & add to list':'✓ Approve'}</button>`:''}<button type="button" class="small danger ghost" data-delete-submission="${q.id}" data-item-name="${esc(p.name)}">🗑 Delete</button></div>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`
+   return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${data.reviewer?`<div class="submission-item-actions" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${canSingleApprove?`<button type="button" class="small primary" data-approve-single="${q.id}" data-revision="${q.revision}">${isNew?'✓ Approve & add to list':'✓ Approve'}</button>`:''}<button type="button" class="small ghost" data-edit-submission="${q.id}">✏️ Edit</button><button type="button" class="small danger ghost" data-delete-submission="${q.id}" data-item-name="${esc(p.name)}">🗑 Delete</button></div>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`
   }).join('')}<div class="actions">${data.reviewer&&pending?`<button class="primary" data-review-list="${index}" data-list-action="accept">${acceptText}</button><button data-review-list="${index}" data-list-action="return">${group.length>1?'Return list with marked items':'Return for correction'}</button><button class="danger ghost" data-review-list="${index}" data-list-action="delete">${group.length>1?'🗑 Delete list':'🗑 Delete'}</button>`:''}${!data.reviewer&&returned&&first.correction_group?`<button class="primary" data-resubmit-list="${first.correction_group}" ${group.some(q=>q.needs_correction)?'disabled':''}>Send full list to master</button>`:''}</div></section>`
  }).join('');
 }

@@ -120,3 +120,40 @@ def test_zero_stock_breakage_can_be_reported_and_approved(clients):
     # Disappears from reviews
     assert len(m.get('/api/reviews').json['submissions'])==0
 
+
+def test_master_can_edit_submission_spelling_count_rate_and_section(clients):
+    m,s,p=clients
+    # Staff submits a new item with typos: "Teapot cupp", qty 2, rate 45, section 1
+    res=p(s,'/items',{'name':'Teapot cupp','specification':'Ceramic','section_id':1,'qty':2,'rate':'45.00','photo':photo()})
+    assert res.status_code==200 and res.json['pending']
+    qid=res.json['reference']
+
+    # Staff cannot edit via admin edit action
+    assert p(s,f'/reviews/{qid}',{'action':'edit','name':'Hacked'}).status_code==403
+
+    # Master edits submission: fixes spelling to "Teapot Cup", changes count to 5, rate to 55, section to 2
+    edit_res=p(m,f'/reviews/{qid}',{'action':'edit','name':'Teapot Cup','qty':5,'rate':'55.00','section_id':2})
+    assert edit_res.status_code==200 and edit_res.json['ok']
+
+    # Check that inbox reflects the edits immediately
+    sub=m.get('/api/reviews').json['submissions'][0]
+    assert sub['section_id']==2
+    assert sub['payload']['name']=='Teapot Cup'
+    assert sub['payload']['qty']==5
+    assert sub['payload']['rate']==5500
+
+    # Audit log records the edit
+    audit_events=m.get('/api/audit').json
+    assert any(a['action']=='SUBMISSION_EDITED' for a in audit_events)
+
+    # Master approves the edited submission
+    assert p(m,f'/reviews/{qid}',{'action':'accept','revision':1}).status_code==200
+
+    # Item is created in section 2 with corrected name, qty 5, and rate 55
+    items=m.get('/api/items').json
+    created=next(i for i in items if i['name']=='Teapot Cup')
+    assert created['section_id']==2
+    assert created['stock']==5
+    assert created['rate']==5500
+
+
