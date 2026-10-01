@@ -25,7 +25,7 @@ def register(a):
             i=a.item(p['item_id']);iid=i['id'];typ=p['type']
             if i['section_id']!=q['section_id']:a.fail('Item moved. Return this report for correction.')
             r=next((r for r in a.report(q['section_id'],p['date'][:7]) if r['id']==iid),None)
-            if not r or r['expected']+p['qty']<0:a.fail('Insufficient stock. Review purchases or correct this quantity.')
+            if not r or (r['expected']>0 and r['expected']+p['qty']<0):a.fail('Insufficient stock. Review purchases or correct this quantity.')
         mid=None
         if p['qty']:
             mid=a.db().execute('INSERT INTO movements(item_id,section_id,type,qty,rate,name,photo,reason,note,date,actor,request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(iid,q['section_id'],typ,p['qty'],p.get('rate'),p['name'],p.get('photo'),p.get('reason',''),p.get('note',''),p['date'],q['actor'],'approved-'+str(q['id']))).lastrowid
@@ -36,7 +36,7 @@ def register(a):
         a.audit('SUBMISSION_ACCEPT',{'id':q['id'],'submitter':q['actor'],'revision':q['revision'],'item_id':iid})
 
     def inbox(private=False):
-        rr=a.rows('SELECT q.*,u.username,u.name staff,s.name section FROM submissions q JOIN users u ON u.id=q.actor JOIN sections s ON s.id=q.section_id ORDER BY q.id DESC')
+        rr=a.rows("SELECT q.*,u.username,u.name staff,s.name section FROM submissions q JOIN users u ON u.id=q.actor JOIN sections s ON s.id=q.section_id WHERE q.status!='ACCEPTED' ORDER BY q.id DESC")
         rr=[r for r in rr if access.allows(r['section_id']) and (not private or (r['actor']==g.user['id'] and r['status']=='RETURNED'))]
         for r in rr:
             r['payload']=json.loads(r['payload'])
@@ -78,8 +78,11 @@ def register(a):
             for q in qs:
                 flagged=q['id'] in marked
                 a.db().execute("UPDATE submissions SET status='RETURNED',correction_group=?,needs_correction=?,feedback=?,reviewer=?,updated=? WHERE id=?",(group,int(flagged),feedback if flagged else '',g.user['id'],a.now(),q['id']))
-            a.audit('LIST_RETURNED',{'group':group,'submitter':qs[0]['actor'],'entries':[q['id'] for q in qs],'marked':marked,'feedback':feedback})
-        else:a.fail('Choose accept or return.')
+        elif action=='delete':
+            for q in qs:
+                a.db().execute('DELETE FROM submissions WHERE id=?',(q['id'],))
+            a.audit('LIST_DELETED',{'submitter':qs[0]['actor'],'entries':[q['id'] for q in qs]})
+        else:a.fail('Choose accept, return or delete.')
         a.db().commit();return jsonify(ok=True)
 
     @a.app.post('/api/corrections/list/<group>/submit')
@@ -96,9 +99,15 @@ def register(a):
 
     @a.app.post('/api/corrections/<int:qid>')
     @a.app.post('/api/reviews/<int:qid>')
+    @a.app.delete('/api/reviews/<int:qid>')
     @a.need()
     def review_submission(qid):
-        a.db().execute('BEGIN IMMEDIATE');q=load(qid);d=request.json;action=d.get('action');p=json.loads(q['payload'])
+        a.db().execute('BEGIN IMMEDIATE');q=load(qid);d=request.json if request.is_json else {};d=d or {};action=d.get('action');p=json.loads(q['payload'])
+        if request.method=='DELETE' or action=='delete':
+            if not reviewer():a.fail('Only the master admin can review submissions.',403)
+            a.db().execute('DELETE FROM submissions WHERE id=?',(qid,))
+            a.audit('SUBMISSION_DELETED',{'id':qid,'submitter':q['actor'],'section_id':q['section_id'],'payload':p})
+            a.db().commit();return jsonify(ok=True)
         if action=='resubmit':
             if q['actor']!=g.user['id']:a.fail('Only the original submitter can correct this report.',403)
             if q['status']=='PENDING':return jsonify(ok=True,status='PENDING')

@@ -736,7 +736,7 @@ def movement():
     editable(i['section_id'],dt[:7])
     r=next((r for r in report(i['section_id'],dt[:7]) if r['id']==i['id']),None)
     if not r: fail('Item did not exist in this period.')
-    if qty<0 and r['expected']+qty<0: fail('This quantity cannot be processed. Please contact the Master.')
+    if qty<0 and r['expected']>0 and r['expected']+qty<0: fail('This quantity cannot be processed. Please contact the Master.')
     rate=money(d.get('rate')) if typ=='PURCHASE' else i['rate']
     photo=save_photo(d.get('photo')) if typ in ('BREAKAGE','DAMAGE') else None
     if g.user['access_role']=='STAFF':

@@ -78,3 +78,45 @@ def test_next_month_40_baseline_variance(clients):
         mod.db().execute('UPDATE lines SET actual=43 WHERE count_id=?',(cid,))
         r=mod.report(1,following)[0];assert r['difference']==3
         mod.db().commit()
+
+
+def test_approved_hidden_from_reviews_and_present_in_audit(clients):
+    m,s,p=clients;i=new_item(m,p);res=send(s,p,i);qid=res.json['reference']
+    assert len(m.get('/api/reviews').json['submissions'])==1
+    assert p(m,f'/reviews/{qid}',{'action':'accept','revision':1}).status_code==200
+    # Approved items must NOT appear in review inbox
+    assert len(m.get('/api/reviews').json['submissions'])==0
+    # But must appear in audit log
+    audit_events=m.get('/api/audit').json
+    assert any(a['action']=='SUBMISSION_ACCEPT' for a in audit_events)
+
+
+def test_delete_submission_and_permissions(clients):
+    m,s,p=clients;i=new_item(m,p);res=send(s,p,i);qid=res.json['reference']
+    # Staff cannot delete submission
+    assert s.delete(f'/api/reviews/{qid}',headers={'X-CSRF-Token':s.csrf}).status_code==403
+    assert p(s,f'/reviews/{qid}',{'action':'delete'}).status_code==403
+    # Master can delete submission
+    del_res=m.delete(f'/api/reviews/{qid}',headers={'X-CSRF-Token':m.csrf})
+    assert del_res.status_code==200 and del_res.json['ok']
+    assert len(m.get('/api/reviews').json['submissions'])==0
+    # Deletion logged in audit
+    audit_events=m.get('/api/audit').json
+    assert any(a['action']=='SUBMISSION_DELETED' for a in audit_events)
+
+
+def test_zero_stock_breakage_can_be_reported_and_approved(clients):
+    m,s,p=clients
+    # Item with 0 opening stock
+    res=p(m,'/items',{'name':'Zero Stock Mug','specification':'Ceramic','section_id':1,'qty':0,'rate':'50','photo':photo()})
+    assert res.status_code==200
+    iid=res.json['id']
+    # Staff reports breakage of 1
+    res=p(s,'/movements',{'item_id':iid,'type':'BREAKAGE','qty':1,'photo':photo(),'reason':'Dropped','note':'accident','request_id':str(uuid.uuid4())})
+    assert res.status_code==200 and res.json['pending']
+    qid=res.json['reference']
+    # Master approves it
+    assert p(m,f'/reviews/{qid}',{'action':'accept','revision':1}).status_code==200
+    # Disappears from reviews
+    assert len(m.get('/api/reviews').json['submissions'])==0
+

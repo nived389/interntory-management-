@@ -722,7 +722,8 @@ window.addEventListener('focus',refreshNotifications);
 
 async function reviewsPage(){
  const data=await api(staffMode()?'/corrections':'/reviews');state.reviewData=data;
- const priority={RETURNED:0,PENDING:1,ACCEPTED:2};data.submissions.sort((a,b)=>priority[a.status]-priority[b.status]||b.id-a.id);
+ data.submissions=(data.submissions||[]).filter(r=>r.status!=='ACCEPTED');
+ const priority={RETURNED:0,PENDING:1};data.submissions.sort((a,b)=>priority[a.status]-priority[b.status]||b.id-a.id);
  if(!state.reviewTab)state.reviewTab='breakage';
 
  const isBreakage=r=>['BREAKAGE','DAMAGE'].includes(r.payload?.type);
@@ -808,6 +809,17 @@ function bindReviews(){
    showModal('Return list with marked items',field('What must staff check?','feedback','text','',true),async d=>{await api('/reviews/list','POST',{action,entries:group.map(q=>({id:q.id,revision:q.revision})),marked,...d});toast('Full list returned to its submitter.');refreshReviewBadge();await render()});
    return;
   }
+  if(action==='delete'){
+   if(!confirm(`Delete this entire submission list (${group.length} item${group.length>1?'s':''})? This cannot be undone.`))return;
+   b.disabled=true;const old=b.textContent;b.textContent='Deleting…';
+   try{
+    await api('/reviews/list','POST',{action:'delete',entries:group.map(q=>({id:q.id,revision:q.revision})),marked:[]});
+    toast('Submission list deleted.');
+    refreshReviewBadge();
+    await render();
+   }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
+   return;
+  }
   if(action==='accept'){
    b.disabled=true;const old=b.textContent;b.textContent='Approving…';
    try{
@@ -818,6 +830,18 @@ function bindReviews(){
     await render();
    }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
   }
+ });
+ $$('[data-delete-submission]').forEach(b=>b.onclick=async()=>{
+  const id=Number(b.dataset.deleteSubmission);
+  const name=b.dataset.itemName||'this submission';
+  if(!confirm(`Delete "${name}" from approvals? This cannot be undone.`))return;
+  b.disabled=true;const old=b.textContent;b.textContent='Deleting…';
+  try{
+   await api('/reviews/'+id,'DELETE');
+   toast(`Deleted "${name}"`);
+   refreshReviewBadge();
+   await render();
+  }catch(e){b.disabled=false;b.textContent=old;toast(e.message)}
  });
  $$('[data-resubmit-list]').forEach(b=>b.onclick=async()=>{
   b.disabled=true;const old=b.textContent;b.textContent='Sending…';
@@ -864,7 +888,7 @@ function submissionLists(data){
   const canSingleApprove=data.reviewer&&pending&&!first.correction_group&&group.length>1;
   return `<section class="submission-list"><h3>${esc(first.payload.type.replace('_',' '))} · ${esc(first.section)} · ${esc(first.payload.date)}</h3><p>Submitted by ${esc(first.username)} · ID ${first.actor} · ${group.length} item(s)</p>${group.map(q=>{
    const p=q.payload;
-   return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${canSingleApprove?`<div style="margin-top:8px"><button class="small primary" data-approve-single="${q.id}" data-revision="${q.revision}">${isNew?'✓ Approve & add to list':'✓ Approve'}</button></div>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`
-  }).join('')}<div class="actions">${data.reviewer&&pending?`<button class="primary" data-review-list="${index}" data-list-action="accept">${acceptText}</button><button data-review-list="${index}" data-list-action="return">${group.length>1?'Return list with marked items':'Return for correction'}</button>`:''}${!data.reviewer&&returned&&first.correction_group?`<button class="primary" data-resubmit-list="${first.correction_group}" ${group.some(q=>q.needs_correction)?'disabled':''}>Send full list to master</button>`:''}</div></section>`
+   return `<article class="review-card ${q.needs_correction?'marked-correction':''}"><div class="row">${thumb(p)}<div><strong>${esc(p.name)}</strong><p>Quantity: ${Math.abs(p.qty)}</p><small>#${q.id} · Revision ${q.revision}</small></div>${statusBadge(q.status)}</div>${p.specification?`<p>${esc(p.specification)}</p>`:''}${p.photo?`<button class="small" data-review-photo="${esc(p.photo)}">View photo</button>`:''}<p>${esc(p.reason||p.note||'')}</p>${data.reviewer&&p.rate!=null?`<p>Unit rate: ${rupees(p.rate)}</p>`:''}${q.feedback?`<p class="notice">${q.needs_correction?'Recheck':'Review note'}: ${esc(q.feedback)}</p>`:''}${data.reviewer&&pending?`<label class="review-mark"><input type="checkbox" data-mark-group="${index}" value="${q.id}"> Mark this item for recheck</label>`:''}${data.reviewer?`<div class="submission-item-actions" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${canSingleApprove?`<button type="button" class="small primary" data-approve-single="${q.id}" data-revision="${q.revision}">${isNew?'✓ Approve & add to list':'✓ Approve'}</button>`:''}<button type="button" class="small danger ghost" data-delete-submission="${q.id}" data-item-name="${esc(p.name)}">🗑 Delete</button></div>`:''}${!data.reviewer&&returned?((!q.correction_group||q.feedback)?`<button class="primary" data-correct-report="${q.id}">${q.needs_correction?'Correct item':'Edit correction'}</button>`:'<p class="help">Not marked. Included for reference; no changes needed.</p>'):''}</article>`
+  }).join('')}<div class="actions">${data.reviewer&&pending?`<button class="primary" data-review-list="${index}" data-list-action="accept">${acceptText}</button><button data-review-list="${index}" data-list-action="return">${group.length>1?'Return list with marked items':'Return for correction'}</button><button class="danger ghost" data-review-list="${index}" data-list-action="delete">${group.length>1?'🗑 Delete list':'🗑 Delete'}</button>`:''}${!data.reviewer&&returned&&first.correction_group?`<button class="primary" data-resubmit-list="${first.correction_group}" ${group.some(q=>q.needs_correction)?'disabled':''}>Send full list to master</button>`:''}</div></section>`
  }).join('');
 }
