@@ -32,5 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_lines_count_item ON lines(count_id, item_id);
 CREATE INDEX IF NOT EXISTS idx_snapshots_count ON snapshots(count_id, version);
 CREATE INDEX IF NOT EXISTS idx_submissions_sec_status ON submissions(section_id, status);
 
-CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY,property_id INTEGER NOT NULL REFERENCES properties(id),name TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',qty INTEGER NOT NULL DEFAULT 1,rate INTEGER,photo TEXT,notes TEXT DEFAULT '',created TEXT NOT NULL,updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY,code TEXT UNIQUE,property_id INTEGER NOT NULL REFERENCES properties(id),name TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',qty INTEGER NOT NULL DEFAULT 1,rate INTEGER,photo TEXT,notes TEXT DEFAULT '',created TEXT NOT NULL,updated TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_assets_prop ON assets(property_id);
+CREATE INDEX IF NOT EXISTS idx_assets_code ON assets(code);

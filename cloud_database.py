@@ -2,8 +2,8 @@
 import re
 import sqlite3
 
-ID_TABLES = set('users properties sections items movements counts snapshots audit archives notifications submissions'.split())
-TABLES = list('users properties sections items movements counts lines snapshots audit archives settings notifications submissions'.split())
+ID_TABLES = set('users properties sections items movements counts snapshots audit archives notifications submissions assets'.split())
+TABLES = list('users properties sections items movements counts lines snapshots audit archives settings notifications submissions assets'.split())
 
 def translate(sql):
     sql = re.sub(r'([\w.]+) COLLATE NOCASE', r'lower(\1)', sql)

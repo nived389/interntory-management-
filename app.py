@@ -139,6 +139,26 @@ def month(v):
     except ValueError: fail('Choose a valid month.')
     if v>date.today().isoformat()[:7]: fail('Future periods are not available.')
     return v
+def next_item_code():
+    rows_codes = rows("SELECT code FROM items WHERE code LIKE 'INV-%'")
+    max_num = 0
+    for r in rows_codes:
+        m = re.match(r'^INV-(\d+)$', r.get('code') or '')
+        if m: max_num = max(max_num, int(m.group(1)))
+    candidate = max_num + 1
+    while one("SELECT 1 FROM items WHERE code=?", (f"INV-{candidate:04d}",)):
+        candidate += 1
+    return f"INV-{candidate:04d}"
+def next_asset_code():
+    rows_codes = rows("SELECT code FROM assets WHERE code LIKE 'AST-%'")
+    max_num = 0
+    for r in rows_codes:
+        m = re.match(r'^AST-(\d+)$', r.get('code') or '')
+        if m: max_num = max(max_num, int(m.group(1)))
+    candidate = max_num + 1
+    while one("SELECT 1 FROM assets WHERE code=?", (f"AST-{candidate:04d}",)):
+        candidate += 1
+    return f"AST-{candidate:04d}"
 def need(role=None):
     def deco(f):
         @wraps(f)
@@ -190,8 +210,15 @@ def init():
                 db().execute('SELECT path FROM stored_files LIMIT 1')
                 ready=one("SELECT value FROM settings WHERE key='turso_migration_ready'")
                 if ready and ready['value']!='true': raise RuntimeError('Turso migration is not complete')
-            db().execute('''CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY,property_id INTEGER NOT NULL REFERENCES properties(id),name TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',qty INTEGER NOT NULL DEFAULT 1,rate INTEGER,photo TEXT,notes TEXT DEFAULT '',created TEXT NOT NULL,updated TEXT NOT NULL)''')
+            db().execute('''CREATE TABLE IF NOT EXISTS assets(id INTEGER PRIMARY KEY,code TEXT,property_id INTEGER NOT NULL REFERENCES properties(id),name TEXT NOT NULL,location TEXT NOT NULL DEFAULT '',qty INTEGER NOT NULL DEFAULT 1,rate INTEGER,photo TEXT,notes TEXT DEFAULT '',created TEXT NOT NULL,updated TEXT NOT NULL)''')
             db().execute('CREATE INDEX IF NOT EXISTS idx_assets_prop ON assets(property_id)')
+            try: db().execute('ALTER TABLE assets ADD COLUMN code TEXT')
+            except Exception: pass
+            for a_row in rows("SELECT id FROM assets WHERE code IS NULL OR code='' ORDER BY id ASC"):
+                db().execute("UPDATE assets SET code=? WHERE id=?", (next_asset_code(), a_row['id']))
+            for h_row in rows("SELECT id, code FROM items WHERE code LIKE 'INV-%' ORDER BY id ASC"):
+                if re.match(r'^INV-[0-9A-Fa-f]{8}$', h_row.get('code') or ''):
+                    db().execute("UPDATE items SET code=? WHERE id=?", (next_item_code(), h_row['id']))
             db().commit()
         return
     with app.app_context():
@@ -208,6 +235,13 @@ def init():
             existing={r['name'] for r in rows('PRAGMA table_info('+table+')')}
             for field,definition in fields.items():
                 if field not in existing: db().execute(f'ALTER TABLE {table} ADD COLUMN {field} {definition}')
+        try: db().execute('ALTER TABLE assets ADD COLUMN code TEXT')
+        except Exception: pass
+        for a_row in rows("SELECT id FROM assets WHERE code IS NULL OR code='' ORDER BY id ASC"):
+            db().execute("UPDATE assets SET code=? WHERE id=?", (next_asset_code(), a_row['id']))
+        for h_row in rows("SELECT id, code FROM items WHERE code LIKE 'INV-%' ORDER BY id ASC"):
+            if re.match(r'^INV-[0-9A-Fa-f]{8}$', h_row.get('code') or ''):
+                db().execute("UPDATE items SET code=? WHERE id=?", (next_item_code(), h_row['id']))
         # Accounts are provisioned once; never reset passwords or access at startup.
         db().commit()
         if not one('SELECT id FROM properties'):
@@ -430,7 +464,7 @@ def create_item():
         cur=db().execute('INSERT INTO submissions(actor,section_id,payload,request_id,created,updated) VALUES(?,?,?,?,?,?)',(g.user['id'],sid,json.dumps(payload),rid,now(),now()))
         audit('NEW_ITEM_SUBMITTED',{'reference':cur.lastrowid,'payload':payload});db().commit()
         return jsonify(ok=True,pending=True,reference=cur.lastrowid)
-    code='INV-'+uuid.uuid4().hex[:8].upper()
+    code=next_item_code()
     cur=db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,d['name'].strip(),sid,spec,category,d.get('unit','Nos'),rate,photo,now()))
     if qty and g.user['access_role']=='STAFF':
         payload=dict(item_id=cur.lastrowid,name=d['name'].strip(),type='PURCHASE',qty=qty,rate=rate,photo=None,reason='',note='New item received stock',date=date.today().isoformat())
@@ -538,9 +572,9 @@ def assets():
         sql += ' AND a.property_id=?'
         args.append(number(p, 1))
     if q:
-        sql += ' AND (LOWER(a.name) LIKE ? OR LOWER(a.location) LIKE ? OR LOWER(a.notes) LIKE ?)'
+        sql += ' AND (LOWER(a.name) LIKE ? OR LOWER(a.code) LIKE ? OR LOWER(a.location) LIKE ? OR LOWER(a.notes) LIKE ?)'
         pat = f'%{q}%'
-        args.extend([pat, pat, pat])
+        args.extend([pat, pat, pat, pat])
     sql += ' ORDER BY a.location ASC, a.name ASC'
     return jsonify(rows(sql, tuple(args)))
 
@@ -559,10 +593,11 @@ def create_asset():
     notes = (d.get('notes') or '').strip()
     ts = now()
     db().execute('BEGIN IMMEDIATE')
-    cur = db().execute('INSERT INTO assets(property_id,name,location,qty,rate,photo,notes,created,updated) VALUES(?,?,?,?,?,?,?,?,?)', (pid, name, location, qty, rate, photo, notes, ts, ts))
-    audit('ASSET_CREATED', {'id': cur.lastrowid, 'name': name, 'property_id': pid, 'qty': qty})
+    code = next_asset_code()
+    cur = db().execute('INSERT INTO assets(code,property_id,name,location,qty,rate,photo,notes,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)', (code, pid, name, location, qty, rate, photo, notes, ts, ts))
+    audit('ASSET_CREATED', {'id': cur.lastrowid, 'code': code, 'name': name, 'property_id': pid, 'qty': qty})
     db().commit()
-    return jsonify(ok=True, id=cur.lastrowid)
+    return jsonify(ok=True, id=cur.lastrowid, code=code)
 
 @app.patch('/api/assets/<int:aid>')
 @need()
@@ -826,7 +861,7 @@ def count_action(sid,m):
     db().commit(); return jsonify(ok=True)
 
 def event_rows(period,p=None,sid=None,types=None):
-    sql='SELECT m.*,s.name section,s.property_id,p.name property,u.name staff,u.username,u.id submitter_id FROM movements m JOIN sections s ON s.id=m.section_id JOIN properties p ON p.id=s.property_id JOIN users u ON u.id=m.actor WHERE m.date LIKE ?'; args=[period+'%']
+    sql='SELECT m.*,i.code,s.name section,s.property_id,p.name property,u.name staff,u.username,u.id submitter_id FROM movements m LEFT JOIN items i ON i.id=m.item_id JOIN sections s ON s.id=m.section_id JOIN properties p ON p.id=s.property_id JOIN users u ON u.id=m.actor WHERE m.date LIKE ?'; args=[period+'%']
     if p: sql+=' AND s.property_id=?'; args.append(p)
     if sid: sql+=' AND m.section_id=?'; args.append(sid)
     if types: sql+=' AND m.type IN ('+','.join('?' for _ in types)+')'; args.extend(types)

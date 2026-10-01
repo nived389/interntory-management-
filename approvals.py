@@ -18,7 +18,7 @@ def register(a):
     def approve(q):
         p=json.loads(q['payload']);open_period(q,p)
         if p['type']=='NEW_ITEM':
-            code='INV-'+uuid.uuid4().hex[:8].upper()
+            code=a.next_item_code()
             iid=a.db().execute('INSERT INTO items(code,name,section_id,specification,category,unit,rate,photo,created) VALUES(?,?,?,?,?,?,?,?,?)',(code,p['name'],q['section_id'],p['specification'],p.get('category',''),p.get('unit','Nos'),p.get('rate'),p['photo'],p['date']+'T00:00:00')).lastrowid
             p['item_id']=iid;typ='OPENING'
         else:
