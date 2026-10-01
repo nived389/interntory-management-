@@ -168,6 +168,13 @@ function bindCountRows(data,locked){
 
    updateCountBadges(data);
    toast(`Recorded: ${r.name} = ${r.actual}`);
+   if(data.items.every(isItemCounted)){
+    try{
+     await api('/counts/'+state.countSection+'/'+state.month,'POST',{action:'submit'});
+     data.status='SUBMITTED';
+     toast('All items counted! Count list automatically pushed to master for approval.');
+    }catch(e){}
+   }
 
    if(state.countTab==='remaining'){
     row.classList.add('count-row-fade');
@@ -736,7 +743,7 @@ async function reviewsPage(){
 
  const pendingFilter=r=>data.reviewer?r.status==='PENDING':r.status==='RETURNED';
  const pendingBreakage=breakageSubmissions.filter(pendingFilter).length;
- const pendingCounts=data.counts.filter(c=>data.reviewer?c.status==='SUBMITTED':c.status==='RETURNED').length;
+ const pendingCounts=data.counts.filter(c=>data.reviewer?['SUBMITTED','IN PROGRESS'].includes(c.status):c.status==='RETURNED').length;
  const pendingNew=newItemSubmissions.filter(pendingFilter).length;
  const pendingPurchases=purchaseSubmissions.filter(pendingFilter).length;
  const totalPending=pendingBreakage+pendingCounts+pendingNew+pendingPurchases;
@@ -750,7 +757,7 @@ async function reviewsPage(){
   const listHtml=submissionLists({...data,submissions:breakageSubmissions});
   contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned breakage reports':'Breakage & damage verification'}</h2><span class="badge">${pendingBreakage} awaiting action</span></div><div class="panel-body">${listHtml||empty('No breakage reports awaiting review.','break')}</div></section>`;
  }else if(state.reviewTab==='counts'){
-  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.length?data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">Submitted by ${esc(c.username||'Legacy record')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join(''):empty('No monthly count reviews or corrections needed.','count')}</div></section>`;
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.length?data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">${c.status==='IN PROGRESS'?`<span class="badge amber" style="margin-right:6px">Counting in progress</span>${c.counted_count!=null?`${c.counted_count}/${c.total_count||'—'} counted · `:''}`:''}Submitted by ${esc(c.username||c.staff||'Staff')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join(''):empty('No monthly count reviews or corrections needed.','count')}</div></section>`;
  }else if(state.reviewTab==='new_item'){
   const listHtml=submissionLists({...data,submissions:newItemSubmissions});
   contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned new item requests':'New item approval'}</h2><span class="badge">${pendingNew} awaiting action</span></div><div class="panel-body">${listHtml||empty('No new item submissions awaiting approval.','plus')}</div></section>`;
@@ -759,7 +766,7 @@ async function reviewsPage(){
   contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned purchases':'Stock purchase approvals'}</h2><span class="badge">${pendingPurchases} awaiting action</span></div><div class="panel-body">${listHtml||empty('No stock purchase submissions awaiting review.','box')}</div></section>`;
  }else{
   const listHtml=submissionLists(data);
-  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned item lists':'Stock & breakage submissions'}</h2><span class="badge">${data.submissions.filter(r=>r.status!=='ACCEPTED').length} awaiting action</span></div><div class="panel-body">${listHtml||'<p class="help">No item submissions awaiting review.</p>'}</div></section><section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">Submitted by ${esc(c.username||'Legacy record')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join('')||'<p class="help">No monthly count reviews needed.</p>'}</div></section>`;
+  contentHtml=`<section class="panel"><div class="panel-head"><h2>${staffMode()?'Returned item lists':'Stock & breakage submissions'}</h2><span class="badge">${data.submissions.filter(r=>r.status!=='ACCEPTED').length} awaiting action</span></div><div class="panel-body">${listHtml||'<p class="help">No item submissions awaiting review.</p>'}</div></section><section class="panel"><div class="panel-head"><h2>${staffMode()?'Monthly counts to correct':'Monthly count reviews'}</h2><span class="badge">${data.counts.length} section(s)</span></div><div class="panel-body">${data.counts.map(c=>`<article class="review-card"><div class="row"><div><strong>${esc(c.section)} · ${esc(c.month)}</strong><p style="margin:4px 0 0 0;font-size:12px;color:var(--muted)">${c.status==='IN PROGRESS'?`<span class="badge amber" style="margin-right:6px">Counting in progress</span>${c.counted_count!=null?`${c.counted_count}/${c.total_count||'—'} counted · `:''}`:''}Submitted by ${esc(c.username||c.staff||'Staff')} · ID ${c.submitted_by||'—'}</p></div>${statusBadge(c.status)}</div><div class="actions" style="margin-top:12px"><button class="primary" data-review-count="${c.section_id}" data-review-month="${c.month}">${data.reviewer?'Review count & differences →':'View count / correct flagged items →'}</button></div></article>`).join('')||'<p class="help">No monthly count reviews needed.</p>'}</div></section>`;
  }
 
  return pageHead(data.reviewer?'Approvals & corrections':staffMode()?'Corrections for you':'Reports & approvals',staffMode()?'Only your returned lists appear here. Correct marked items, then send the complete list to master.':'Overview of submissions. Differentiate easily between breakage, monthly counts, and new added items.')+overviewHtml+categoryTabsHtml+contentHtml;
@@ -933,9 +940,37 @@ async function editSubmissionModal(qid){
 
 async function refreshReviewBadge(){
  if(!state.user||document.hidden||(!staffMode()&&!state.user.is_owner))return;
- try{const d=await api(staffMode()?'/corrections':'/reviews');const n=d.submissions.filter(r=>d.reviewer?r.status==='PENDING':r.status==='RETURNED').length+d.counts.filter(r=>d.reviewer?r.status==='SUBMITTED':r.status==='RETURNED').length;const label=$(staffMode()?'[data-page="corrections"] span':'[data-page="reviews"] span');if(label)label.textContent=(staffMode()?'Corrections':'Reports & approvals')+(n?' ('+n+')':'');}catch(e){}
+ try{
+  const d=await api(staffMode()?'/corrections':'/reviews');
+  const n=d.submissions.filter(r=>d.reviewer?r.status==='PENDING':r.status==='RETURNED').length+d.counts.filter(r=>d.reviewer?['SUBMITTED','IN PROGRESS'].includes(r.status):r.status==='RETURNED').length;
+  const label=$(staffMode()?'[data-page="corrections"] span':'[data-page="reviews"] span');
+  if(label)label.textContent=(staffMode()?'Corrections':'Reports & approvals')+(n?' ('+n+')':'');
+ }catch(e){}
 }
-setInterval(refreshReviewBadge,30000);
+setInterval(refreshReviewBadge,8000);
+
+let lastReviewHash='';
+async function pollReviewsAutoPush(){
+ if(!state.user||document.hidden||state.page!=='reviews')return;
+ if($('#modal')?.open)return;
+ const activeEl=document.activeElement;
+ if(activeEl&&['INPUT','TEXTAREA','SELECT'].includes(activeEl.tagName)&&activeEl.id!=='f-property')return;
+ try{
+  const d=await api(staffMode()?'/corrections':'/reviews');
+  const hash=JSON.stringify([
+   (d.submissions||[]).map(s=>[s.id,s.status,s.revision,s.updated,s.section_id]),
+   (d.counts||[]).map(c=>[c.id,c.status,c.month,c.counted_count,c.submitted_by])
+  ]);
+  if(lastReviewHash&&hash!==lastReviewHash){
+   lastReviewHash=hash;
+   state.reviewData=d;
+   await render();
+  }else{
+   lastReviewHash=hash;
+  }
+ }catch(e){}
+}
+setInterval(pollReviewsAutoPush,4000);
 
 function staffShell(){
  $('#app').innerHTML=`<div class="staff-shell"><header class="staff-header"><div class="brand"><img src="/static/travelicious-logo.png" alt="Travelicious"><div><strong>Travelicious</strong><small>${esc(state.user.name)} · ${esc(state.user.username)}</small></div></div><button id="profile-button" aria-label="Open profile">Profile</button></header><div class="staff-filters"><select id="property" aria-label="Property">${state.context.properties.map(p=>`<option value="${p.id}" ${String(p.id)===state.property?'selected':''}>${esc(p.name)}</option>`).join('')}</select>${state.page==='counts'?`<span id="staff-count-month" class="badge" aria-label="Automatic count month">${monthLabel()} · automatic</span>`:''}</div><main id="main"></main><nav class="staff-bottom" aria-label="Main navigation">${[['dashboard','Home'],['corrections','Corrections']].map(([key,label])=>`<button data-page="${key}" class="${state.page===key?'active':''}"><span>${label}</span></button>`).join('')}<button id="staff-logout">Log out</button></nav></div>`;

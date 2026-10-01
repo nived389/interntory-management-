@@ -41,7 +41,7 @@ def register(a):
         for r in rr:
             r['payload']=json.loads(r['payload'])
             if private:r['payload'].pop('rate',None)
-        cc=a.rows("SELECT c.*,u.username,u.name staff,s.name section FROM counts c LEFT JOIN users u ON u.id=c.submitted_by JOIN sections s ON s.id=c.section_id WHERE c.status IN ('SUBMITTED','RETURNED','CLOSED') ORDER BY c.month DESC")
+        cc=a.rows("SELECT c.*,u.username,u.name staff,s.name section,(SELECT COUNT(*) FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL) counted_count,(SELECT COUNT(*) FROM items i WHERE i.section_id=c.section_id AND i.active=1) total_count FROM counts c LEFT JOIN users u ON u.id=c.submitted_by JOIN sections s ON s.id=c.section_id WHERE c.status IN ('SUBMITTED','RETURNED','CLOSED') OR (c.status='IN PROGRESS' AND EXISTS (SELECT 1 FROM lines l WHERE l.count_id=c.id AND l.actual IS NOT NULL)) ORDER BY c.month DESC")
         cc=[r for r in cc if access.allows(r['section_id']) and (not private or (r['submitted_by']==g.user['id'] and r['status']=='RETURNED'))]
         return jsonify(submissions=rr,counts=cc,reviewer=not private)
 

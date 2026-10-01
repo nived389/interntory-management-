@@ -848,11 +848,11 @@ def count_action(sid,m):
         actual=number(d.get('actual'))
         db().execute('INSERT INTO lines(count_id,item_id,actual,note,flag) VALUES(?,?,?,?,?) ON CONFLICT(count_id,item_id) DO UPDATE SET actual=excluded.actual,note=excluded.note,flag=excluded.flag',(c['id'],i['id'],actual,note,flag))
         db().execute('UPDATE lines SET actor=?,needs_correction=0 WHERE count_id=? AND item_id=?',(g.user['id'],c['id'],i['id']))
-        db().execute("UPDATE counts SET status=?,submitted_by=COALESCE(submitted_by,?) WHERE id=?",('RETURNED' if c['status']=='RETURNED' else 'IN PROGRESS',g.user['id'],c['id'])); audit('COUNT_SAVED',{'section':sid,'month':m,'item':i['id'],'actual':actual,'note':note})
+        db().execute("UPDATE counts SET status=?,submitted_by=COALESCE(submitted_by,?),submitted_at=COALESCE(submitted_at,?) WHERE id=?",('RETURNED' if c['status']=='RETURNED' else 'IN PROGRESS',g.user['id'],now(),c['id'])); audit('COUNT_SAVED',{'section':sid,'month':m,'item':i['id'],'actual':actual,'note':note})
     elif action in ('submit','close'):
         if action=='close':
             if not review_admin(): fail('Admin count review permission required.',403)
-            if c['status']!='SUBMITTED': fail('Submit the complete count before closing.')
+            if c['status'] not in ('SUBMITTED','IN PROGRESS'): fail('Submit the complete count before closing.')
         else: editable(sid,m)
         if one('SELECT item_id FROM lines WHERE count_id=? AND needs_correction=1',(c['id'],)): fail('Correct every flagged item before submitting.',409)
         if action=='close' and one("SELECT id FROM submissions WHERE section_id=? AND substr(json_extract(payload,'$.date'),1,7)<=? AND status IN ('PENDING','RETURNED')",(sid,m)): fail('Resolve pending or returned stock reports before accepting this count.',409)

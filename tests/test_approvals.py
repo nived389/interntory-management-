@@ -157,3 +157,24 @@ def test_master_can_edit_submission_spelling_count_rate_and_section(clients):
     assert created['rate']==5500
 
 
+def test_in_progress_count_automatically_pushed_to_reviews_inbox(clients):
+    m,s,p=clients;i=new_item(m,p);month=mod.date.today().isoformat()[:7];path='/counts/1/'+month
+    # Initially no counts in progress or submitted
+    initial_counts=[c for c in m.get('/api/reviews').json['counts'] if c['section_id']==1 and c['month']==month]
+    assert len(initial_counts)==0
+
+    # Staff saves a count for item i (marking it done)
+    assert p(s,path,{'action':'save','item_id':i,'actual':10}).status_code==200
+
+    # Automatically visible in review inbox under counts!
+    rev_counts=[c for c in m.get('/api/reviews').json['counts'] if c['section_id']==1 and c['month']==month]
+    assert len(rev_counts)==1
+    assert rev_counts[0]['status']=='IN PROGRESS'
+    assert rev_counts[0]['counted_count']==1
+    assert rev_counts[0]['submitted_by']==2
+
+    # Master can close the count directly since all items are counted
+    assert p(m,path,{'action':'close'}).status_code==200
+
+
+
