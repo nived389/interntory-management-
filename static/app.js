@@ -642,7 +642,76 @@ async function inventoryEntry(){
   $('#inventory-continue').onclick=()=>{const choice=$('#f-inventory_choice').value;choice==='new'?itemForm():movementForm('PURCHASE',Number(choice))};
  }catch(e){toast(e.message)}
 }
-function itemForm(r){const requestId=crypto.randomUUID();const opts=state.context.sections.filter(s=>s.active).map(s=>[s.id,state.context.properties.find(p=>p.id===s.property_id).name+' / '+s.name]);let getPhoto;showModal(r?'Edit item':'Add a new item',`<div class="form-grid">${r?.code?`<div class="field full"><label>Serial Number (Fixed)</label><input type="text" value="${esc(r.code)}" disabled style="background:var(--bg,#f4f6f8);font-family:monospace;font-weight:700;color:var(--text,#173f35)"></div>`:`<div class="field full"><label>Serial Number</label><input type="text" value="Automatic (assigned upon saving)" disabled style="background:var(--bg,#f4f6f8);font-style:italic;color:var(--muted,#666)"></div>`}${uploadField(!r)}${field('Item name *','name','text',r?.name||'',true)}${selectField('Property / section','section_id',opts,r?.section_id||state.section||sections()[0]?.id)}${selectField('Unit','unit',[['Nos','Nos'],['Set','Set'],['Pair','Pair'],['Piece','Piece']],r?.unit||'Nos')}${field('Unit rate (INR, if known)','rate','number',r?.rate==null?'':r.rate/100,false,'min="0" step="0.01"')}${!r?field('Opening / received quantity','qty','number','0',true,'min="0" step="1"'):''}${r?`${field('Specification','specification','text',r?.specification||'')}${field('Category','category','text',r?.category||'')}`:''}</div>`,async d=>{const photo=getPhoto();if(!r&&!photo)throw new Error('Add and review a photo before saving.');if(!r&&state.items.some(i=>i.name.trim().toLowerCase()===d.name.trim().toLowerCase())&&!confirm('An item with this name already exists. Create another item?'))throw new Error('Choose a different name or use the existing item.');await api('/items'+(r?'/'+r.id:''),r?'PATCH':'POST',{...d,request_id:requestId,...(photo?{photo}:{})});toast(r?'Item updated':state.user.role==='STAFF'?'Sent to master. Item appears only after acceptance.':'Item created')});getPhoto=photoBinding()}
+function bindItemNameCaution(isEditId=null,cautionContainerId='item-name-caution',nameInputId='f-name',sectionInputId='f-section_id',excludeSubId=null){
+ const cautionEl=$('#'+cautionContainerId);
+ const nameInput=$('#'+nameInputId);
+ const secInput=$('#'+sectionInputId);
+ if(!cautionEl||!nameInput||!secInput)return;
+ let timer=null;
+ let checkSeq=0;
+ async function performCheck(){
+  const rawName=nameInput.value.trim();
+  const sid=secInput.value;
+  if(!rawName||!sid){
+   cautionEl.style.display='none';
+   cautionEl.innerHTML='';
+   return;
+  }
+  const currentSeq=++checkSeq;
+  try{
+   const q=`/items/check-name?name=${encodeURIComponent(rawName)}&section_id=${encodeURIComponent(sid)}${isEditId?`&exclude_id=${isEditId}`:''}${excludeSubId?`&exclude_sub_id=${excludeSubId}`:''}`;
+   const res=await api(q);
+   if(currentSeq!==checkSeq)return;
+   if(res.in_section){
+    cautionEl.className='field full item-caution-banner caution-warning';
+    cautionEl.style.display='flex';
+    cautionEl.innerHTML=`<span class="caution-icon">⚠️</span><div class="caution-content"><strong>Caution: Item name is repeating in this section</strong><p>An item named "<strong>${esc(res.item.name)}</strong>" already exists in <strong>${esc(res.item.section)}</strong> (Serial No: <code>${esc(res.item.code||'Assigned')}</code>${res.item.unit?` · Unit: ${esc(res.item.unit)}`:''}). Adding it will create a duplicate in this section.</p></div>`;
+   }else if(res.is_pending){
+    cautionEl.className='field full item-caution-banner caution-warning';
+    cautionEl.style.display='flex';
+    cautionEl.innerHTML=`<span class="caution-icon">⏳</span><div class="caution-content"><strong>Caution: Item already submitted for this section</strong><p>An item named "<strong>${esc(res.item.name)}</strong>" has already been submitted for <strong>${esc(res.item.section)}</strong> and is awaiting Master approval.</p></div>`;
+   }else if(res.other_section){
+    cautionEl.className='field full item-caution-banner caution-info';
+    cautionEl.style.display='flex';
+    cautionEl.innerHTML=`<span class="caution-icon">ℹ️</span><div class="caution-content"><strong>Notice: Item exists in another section</strong><p>An item named "<strong>${esc(res.other_section.name)}</strong>" already exists in <strong>${esc(res.other_section.section)}</strong> (Serial No: <code>${esc(res.other_section.code||'Assigned')}</code>). If this is separate stock for this section, you may continue.</p></div>`;
+   }else{
+    cautionEl.style.display='none';
+    cautionEl.innerHTML='';
+   }
+  }catch(e){
+   console.warn('Name check error:',e);
+  }
+ }
+ nameInput.addEventListener('input',()=>{
+  clearTimeout(timer);
+  timer=setTimeout(performCheck,180);
+ });
+ secInput.addEventListener('change',performCheck);
+ if(nameInput.value.trim())performCheck();
+}
+function itemForm(r){
+ const requestId=crypto.randomUUID();
+ const opts=state.context.sections.filter(s=>s.active).map(s=>[s.id,state.context.properties.find(p=>p.id===s.property_id).name+' / '+s.name]);
+ let getPhoto;
+ showModal(r?'Edit item':'Add a new item',`<div class="form-grid">${r?.code?`<div class="field full"><label>Serial Number (Fixed)</label><input type="text" value="${esc(r.code)}" disabled style="background:var(--bg,#f4f6f8);font-family:monospace;font-weight:700;color:var(--text,#173f35)"></div>`:`<div class="field full"><label>Serial Number</label><input type="text" value="Automatic (assigned upon saving)" disabled style="background:var(--bg,#f4f6f8);font-style:italic;color:var(--muted,#666)"></div>`}${uploadField(!r)}${field('Item name *','name','text',r?.name||'',true)}${selectField('Property / section','section_id',opts,r?.section_id||state.section||sections()[0]?.id)}<div id="item-name-caution" class="field full item-caution-banner" style="display:none" role="alert"></div>${selectField('Unit','unit',[['Nos','Nos'],['Set','Set'],['Pair','Pair'],['Piece','Piece']],r?.unit||'Nos')}${field('Unit rate (INR, if known)','rate','number',r?.rate==null?'':r.rate/100,false,'min="0" step="0.01"')}${!r?field('Opening / received quantity','qty','number','0',true,'min="0" step="1"'):''}${r?`${field('Specification','specification','text',r?.specification||'')}${field('Category','category','text',r?.category||'')}`:''}</div>`,async d=>{
+  const photo=getPhoto();
+  if(!r&&!photo)throw new Error('Add and review a photo before saving.');
+  const sid=d.section_id;
+  const rawName=(d.name||'').trim();
+  const check=await api(`/items/check-name?name=${encodeURIComponent(rawName)}&section_id=${encodeURIComponent(sid)}${r?`&exclude_id=${r.id}`:''}`);
+  if(check.in_section){
+   const proceed=confirm(`⚠️ CAUTION: An item named "${check.item.name}" already exists in ${check.item.section} (Serial No: ${check.item.code}).\n\nAre you sure you want to add another item with the exact same name to this section?`);
+   if(!proceed)throw new Error('Cancelled: Item name already exists in this section.');
+  }else if(check.is_pending){
+   const proceed=confirm(`⚠️ CAUTION: An item named "${check.item.name}" has already been submitted for ${check.item.section} and is waiting for Master review.\n\nAre you sure you want to submit another item with the same name?`);
+   if(!proceed)throw new Error('Cancelled: A duplicate submission is already pending review in this section.');
+  }
+  await api('/items'+(r?'/'+r.id:''),r?'PATCH':'POST',{...d,request_id:requestId,...(photo?{photo}:{})});
+  toast(r?'Item updated':state.user.role==='STAFF'?'Sent to master. Item appears only after acceptance.':'Item created')
+ });
+ getPhoto=photoBinding();
+ bindItemNameCaution(r?.id||null,'item-name-caution','f-name','f-section_id');
+}
 function moveItemForm(r){
  const choices=state.context.sections.filter(s=>s.active&&s.id!==r.section_id).map(s=>[s.id,state.context.properties.find(p=>p.id===s.property_id).name+' / '+s.name]);
  if(!choices.length)return toast('No other accessible sections.');
@@ -891,6 +960,7 @@ async function editSubmissionModal(qid){
    ${selectField('Property / section *','section_id',secOpts,r.section_id)}
    ${itemSelectHtml}
    ${field('Item name * (fix spelling)','name','text',p.name,true)}
+   <div id="sub-name-caution" class="field full item-caution-banner" style="display:none" role="alert"></div>
    ${field('Count / quantity *','qty','number',Math.abs(p.qty),true,'min="0" step="1"')}
    ${field('Unit rate (INR)','rate','number',p.rate==null?'':p.rate/100,false,'min="0" step="0.01"')}
    ${isNew?selectField('Unit','unit',[['Nos','Nos'],['Set','Set'],['Pair','Pair'],['Piece','Piece']],p.unit||'Nos'):''}
@@ -901,6 +971,14 @@ async function editSubmissionModal(qid){
   </div>
   <p class="help">Correct spelling, count quantity, rate, or section directly as admin. Changes save immediately for review.</p>
  `,async d=>{
+  if(isNew){
+   const sid=Number(d.section_id);
+   const rawName=d.name.trim();
+   const check=await api(`/items/check-name?name=${encodeURIComponent(rawName)}&section_id=${encodeURIComponent(sid)}&exclude_sub_id=${r.id}`);
+   if(check.in_section){
+    if(!confirm(`⚠️ CAUTION: An item named "${check.item.name}" already exists in ${check.item.section} (Serial No: ${check.item.code}).\n\nSave changes anyway?`))return;
+   }
+  }
   await api('/reviews/'+r.id,'POST',{
    action:'edit',
    name:d.name.trim(),
@@ -919,6 +997,9 @@ async function editSubmissionModal(qid){
  });
 
  $('#dialog-form [type="submit"]').textContent='Save changes';
+ if(isNew){
+  bindItemNameCaution(null,'sub-name-caution','f-name','f-section_id',r.id);
+ }
 
  if($('#f-item_id')){
   $('#f-item_id').onchange=async e=>{

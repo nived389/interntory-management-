@@ -24,6 +24,7 @@ tmp/
 Thumbs.db
 *.log
 *.pid
+*.db
 
 .vercel
 .env*

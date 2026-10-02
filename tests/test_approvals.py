@@ -202,5 +202,49 @@ def test_non_master_item_and_movement_always_require_approval(clients):
     assert created['stock']==5
     assert created['code'].startswith('INV-')
 
+def test_check_item_name_duplicate_in_section(clients):
+    m,s,p=clients
+    # Master creates item in section 1 ('Test mug')
+    iid=new_item(m,p,1)
+    
+    # 1. Exact match in section 1
+    res=m.get('/api/items/check-name?name=Test mug&section_id=1').json
+    assert res['in_section'] is True
+    assert res['exists'] is True
+    assert res['item']['id']==iid
+    assert res['item']['name']=='Test mug'
+    assert res['item']['code'].startswith('INV-')
+    
+    # 2. Case-insensitive and trimmed match
+    res_case=s.get('/api/items/check-name?name=  test MUG  &section_id=1').json
+    assert res_case['in_section'] is True
+    assert res_case['exists'] is True
+    assert res_case['item']['id']==iid
+    
+    # 3. Different section: section 2 does not have it, but reports other_section
+    res_diff=m.get('/api/items/check-name?name=Test mug&section_id=2').json
+    assert res_diff['in_section'] is False
+    assert res_diff['is_pending'] is False
+    assert res_diff['other_section']['id']==iid
+    assert res_diff['other_section']['name']=='Test mug'
+    
+    # 4. Exclude self on edit
+    res_exclude=m.get(f'/api/items/check-name?name=Test mug&section_id=1&exclude_id={iid}').json
+    assert res_exclude['in_section'] is False
+    assert res_exclude['exists'] is False
+    
+    # 5. Pending item submitted by staff
+    p(s,'/items',{'name':'Pending Dessert Fork','section_id':1,'qty':12,'rate':50,'photo':photo()})
+    res_pend=s.get('/api/items/check-name?name=Pending Dessert Fork&section_id=1').json
+    assert res_pend['in_section'] is False
+    assert res_pend['is_pending'] is True
+    assert res_pend['exists'] is True
+    assert res_pend['item']['name']=='Pending Dessert Fork'
+    
+    # 6. Completely unique name or empty
+    assert s.get('/api/items/check-name?name=Nonexistent XYZ 123&section_id=1').json['exists'] is False
+    assert s.get('/api/items/check-name?name=&section_id=1').json['exists'] is False
+
+
 
 

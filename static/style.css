@@ -104,5 +104,16 @@ tr.counted-row td{background:#fbfdf9}
   .count-input-group .count-input{flex:1}
 }
 
+/* Item Name Duplicate Caution Banner */
+.item-caution-banner{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-radius:10px;font-size:13px;line-height:1.5;margin:4px 0 12px 0;transition:all .2s ease}
+.item-caution-banner.caution-warning{background:#fff8e8;border:1.5px solid #f6cf7b;color:#7a4603}
+.item-caution-banner.caution-info{background:#eff6ff;border:1.5px solid #bfdbfe;color:#1e40af}
+.item-caution-banner .caution-icon{font-size:20px;line-height:1;flex-shrink:0;margin-top:2px}
+.item-caution-banner .caution-content{flex:1}
+.item-caution-banner .caution-content strong{display:block;font-size:13px;font-weight:700;margin-bottom:3px}
+.item-caution-banner .caution-content p{margin:0;font-size:12.5px;line-height:1.5}
+.item-caution-banner code{font-family:monospace;font-weight:700;background:rgba(0,0,0,0.07);padding:2px 6px;border-radius:4px}
+
+
 
 

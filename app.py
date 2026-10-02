@@ -444,6 +444,64 @@ def item_options():
     candidates=rows('SELECT i.id,i.name,i.code,i.specification,i.photo,i.unit,i.section_id,s.name section,s.property_id FROM items i JOIN sections s ON s.id=i.section_id WHERE i.active=1 AND s.active=1 ORDER BY i.name')
     return jsonify([r for r in candidates if access.allows(r['section_id']) and (not request.args.get('property') or str(r['property_id'])==request.args['property'])])
 
+@app.get('/api/items/check-name')
+@need()
+def check_item_name():
+    raw_name=(request.args.get('name') or '').strip()
+    sid_val=request.args.get('section_id')
+    exclude_id=request.args.get('exclude_id')
+    exclude_sub_id=request.args.get('exclude_sub_id')
+    if not raw_name or not sid_val:
+        return jsonify(in_section=False,is_pending=False,exists=False)
+    try: sid=int(sid_val)
+    except (ValueError,TypeError): return jsonify(in_section=False,is_pending=False,exists=False)
+    
+    target_norm=raw_name.lower()
+    
+    # 1. Check existing active items in the specified section
+    items_in_sec=rows("SELECT i.id,i.name,i.code,i.section_id,i.unit,s.name as section FROM items i JOIN sections s ON s.id=i.section_id WHERE i.section_id=? AND i.active=1",(sid,))
+    for itm in items_in_sec:
+        if exclude_id and str(itm['id'])==str(exclude_id): continue
+        if (itm['name'] or '').strip().lower()==target_norm:
+            return jsonify(
+                in_section=True,
+                is_pending=False,
+                exists=True,
+                item={'id':itm['id'],'name':itm['name'],'code':itm['code'] or 'Assigned','section':itm['section'],'section_id':itm['section_id'],'unit':itm['unit']}
+            )
+            
+    # 2. Check pending / returned submissions in the specified section
+    subs_in_sec=rows("SELECT id,payload,status FROM submissions WHERE section_id=? AND status IN ('PENDING','RETURNED')",(sid,))
+    for sub in subs_in_sec:
+        if exclude_sub_id and str(sub['id'])==str(exclude_sub_id): continue
+        try:
+            p=json.loads(sub['payload'])
+            if p.get('type')=='NEW_ITEM' and (p.get('name') or '').strip().lower()==target_norm:
+                sec_row=one("SELECT name FROM sections WHERE id=?",(sid,))
+                return jsonify(
+                    in_section=False,
+                    is_pending=True,
+                    exists=True,
+                    submission_id=sub['id'],
+                    status=sub['status'],
+                    item={'name':p.get('name'),'section':sec_row['name'] if sec_row else 'this section','section_id':sid,'unit':p.get('unit','Nos'),'qty':p.get('qty',0)}
+                )
+        except Exception: pass
+
+    # 3. Check if name exists in another section (informational)
+    other_items=rows("SELECT i.id,i.name,i.code,i.section_id,i.unit,s.name as section FROM items i JOIN sections s ON s.id=i.section_id WHERE i.section_id!=? AND i.active=1 AND s.active=1",(sid,))
+    for itm in other_items:
+        if exclude_id and str(itm['id'])==str(exclude_id): continue
+        if (itm['name'] or '').strip().lower()==target_norm:
+            return jsonify(
+                in_section=False,
+                is_pending=False,
+                exists=True,
+                other_section={'id':itm['id'],'name':itm['name'],'code':itm['code'] or 'Assigned','section':itm['section'],'section_id':itm['section_id'],'unit':itm['unit']}
+            )
+
+    return jsonify(in_section=False,is_pending=False,exists=False)
+
 @app.post('/api/items')
 @need()
 def create_item():
